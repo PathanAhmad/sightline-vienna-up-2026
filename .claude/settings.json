@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "NotebookEdit(*)",
+      "Agent(*)",
+      "Monitor(*)",
+      "TaskOutput(*)",
+      "TaskStop(*)",
+      "TodoWrite(*)",
+      "ToolSearch(*)",
+      "Skill(*)",
+      "ScheduleWakeup(*)",
+      "CronCreate(*)",
+      "CronDelete(*)",
+      "CronList(*)",
+      "EnterPlanMode(*)",
+      "ExitPlanMode(*)",
+      "EnterWorktree(*)",
+      "ExitWorktree(*)",
+      "PushNotification(*)",
+      "RemoteTrigger(*)",
+      "mcp__context7__*",
+      "mcp__github__*",
+      "mcp__tavily__*",
+      "mcp__playwright__*",
+      "mcp__render__*",
+      "mcp__sequential-thinking__*"
+    ]
+  }
+}

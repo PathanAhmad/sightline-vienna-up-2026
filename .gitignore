@@ -1,0 +1,9 @@
+# Per-developer Claude settings
+.claude/settings.local.json
+
+# Playwright MCP cache/output
+.playwright-mcp/
+
+# Local screenshots and personal prep (not for team repo)
+*.png
+linkedin-profile-snapshot.md
