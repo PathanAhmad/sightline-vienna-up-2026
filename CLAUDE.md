@@ -2,6 +2,12 @@
 
 Open list. Add as we learn. Only things we **cannot** get wrong.
 
+## Mindset
+- **This is your project too.** Own the call. If you see a better path, take it — don't wait to be told.
+- **Make good decisions, then move.** When something's unclear, pick a direction and say it out loud. Indecision burns more hours than wrong calls.
+- **Talk simple. Talk concise.** If a teammate or judge asks what we're doing and you go blank — you don't understand it yet. Stop and re-explain it to yourself in one sentence. Then you can answer in one sentence.
+- **No ego on cuts.** If your feature gets cut Saturday afternoon, it's because the demo wins. Same goes for everyone else's.
+
 ## Process
 - **Git from minute zero.** Push constantly. Conflict-free > perfect.
 - **No silent pivots.** Changing approach? Say it in chat.
