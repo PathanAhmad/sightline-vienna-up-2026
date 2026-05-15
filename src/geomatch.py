@@ -218,7 +218,8 @@ class Geocoder:
             # end up in screenshots, demo recordings, or pasted bug reports).
             redacted = (key[:3] + "...") if len(key) > 3 else "..."
             print(f"[geomatch] Nominatim error on addr={redacted!r}: {type(e).__name__}", file=sys.stderr)
-            log_event("geomatch", "nominatim_fail", addr_prefix=redacted, error_class=type(e).__name__)
+            # Audit log contract is shareable: error_class only, no address fragment.
+            log_event("geomatch", "nominatim_fail", error_class=type(e).__name__)
             return None
         self._last_call = time.time()
         # Cache even null results so we don't retry every run

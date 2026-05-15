@@ -95,7 +95,8 @@ def build_manifest() -> int:
             except sqlite3.IntegrityError:
                 # Byte-identical duplicate. Rare but possible (file copied twice in dataset).
                 collisions += 1
-                log_event("ingest", "byte_identical_skip", photo_id=pid, filename=p.name)
+                # Audit log contract is shareable: photo_id only, no filenames.
+                log_event("ingest", "byte_identical_skip", photo_id=pid)
     conn.execute("CREATE INDEX idx_photos_filename ON photos(filename)")
     conn.close()
     if collisions:
