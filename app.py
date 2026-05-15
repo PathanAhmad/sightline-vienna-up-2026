@@ -1026,14 +1026,20 @@ def _render_live_score_result(
         unsafe_allow_html=True,
     )
 
-    # Overlay fields (the geomatch signals Claude read off the photo)
+    # Overlay fields (the geomatch signals Claude read off the photo).
+    # Address + lat/lon are NDA-redacted on screen so a demoer who drops
+    # a Resources/ photo in front of judges doesn't leak the route. The
+    # full values still flow through the pipeline; the UI just doesn't
+    # render them. Matches the redaction pattern at src/geomatch.py:219.
     overlay_rows = []
     if getattr(qc, "overlay_date", ""):
         overlay_rows.append(("Date", qc.overlay_date))
     if getattr(qc, "overlay_address", ""):
-        overlay_rows.append(("Address", qc.overlay_address))
+        addr = qc.overlay_address
+        redacted = (addr[:3] + "…") if len(addr) > 3 else "…"
+        overlay_rows.append(("Address", f"{redacted}  (NDA-redacted)"))
     if getattr(qc, "overlay_latlon", None):
-        overlay_rows.append(("Lat/Lon", qc.overlay_latlon))
+        overlay_rows.append(("Lat/Lon", "✓ present  (NDA-redacted)"))
     if getattr(qc, "paper_label_code", None):
         overlay_rows.append(("Paper label", qc.paper_label_code))
     if overlay_rows:
@@ -1172,9 +1178,13 @@ def render_live_score_sidebar() -> None:
                 progress.empty()
 
             # Render results in upload order. Multiple photos stack
-            # vertically; each gets a small filename header so the
-            # demoer can point to which result is which.
-            for f in uploaded_files:
+            # vertically; each gets a small "Photo N" header so the
+            # demoer can point to which result is which. We use an
+            # index, not the filename, because Resources/ filenames can
+            # carry route hints (camera-app prefixes, FCP codes that
+            # someone renamed locally) that we don't want on the
+            # projector during the demo.
+            for idx, f in enumerate(uploaded_files, 1):
                 file_bytes = f.getvalue()
                 key = (f.name, len(file_bytes))
                 if key not in cache:
@@ -1187,7 +1197,7 @@ def render_live_score_sidebar() -> None:
                         f"<code style='font-family:ui-monospace,monospace;"
                         f"font-size:11px;background:var(--c-bg);"
                         f"padding:2px 6px;border-radius:4px;'>"
-                        f"{f.name}</code></div>",
+                        f"Photo {idx}</code></div>",
                         unsafe_allow_html=True,
                     )
                 if err:
