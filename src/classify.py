@@ -134,6 +134,12 @@ def segment_verdict(
     if n == 0:
         return "RED", segment_length_m, ["no compliant photos snapped"]
 
+    # Short-segment shortcut: a segment shorter than the 5m gap window can
+    # never have a >5m internal gap, and "within 5m of start and end" is
+    # trivially true once at least one compliant photo exists.
+    if segment_length_m <= GREEN_MAX_GAP_M:
+        return "GREEN", 0.0, []
+
     # Density check
     if segment_length_m > 0 and (n / segment_length_m) < RED_MIN_DENSITY_PER_M:
         reasons.append(f"density {n}/{segment_length_m:.0f}m below 1/10m")
@@ -233,15 +239,27 @@ def main() -> int:
             continue
         cid = forensics.get(pid, {}).get("phash_cluster_id", -1)
         compliant, reasons = is_photo_compliant(qc, geo)
-        # Cluster dedup: keep the first/representative entry for this cluster on this segment
+        # Cluster dedup: one entry per (segment, phash cluster). Tiebreaks,
+        # in order: compliant beats non-compliant, the representative beats
+        # inherited duplicates, the lowest photo_id wins (deterministic).
+        rep_id = cluster_to_rep.get(cid)
         existing = photos_by_segment[seg_id].get(cid)
-        if existing is None or (compliant and not existing["compliant"]):
-            photos_by_segment[seg_id][cid] = {
-                "photo_id": pid,
-                "t": float(geo.get("segment_t") or 0.0),
-                "compliant": compliant,
-                "reasons": reasons,
-            }
+
+        def _score(entry: dict) -> tuple:
+            return (
+                0 if entry["compliant"] else 1,
+                0 if entry["photo_id"] == rep_id else 1,
+                entry["photo_id"],
+            )
+
+        candidate = {
+            "photo_id": pid,
+            "t": float(geo.get("segment_t") or 0.0),
+            "compliant": compliant,
+            "reasons": reasons,
+        }
+        if existing is None or _score(candidate) < _score(existing):
+            photos_by_segment[seg_id][cid] = candidate
 
     # Per-segment verdicts
     rows_out: list[dict] = []

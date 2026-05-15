@@ -212,7 +212,14 @@ def score_one_photo(client, model: str, exemplar_prefix: list[dict], photo_path:
             output_format=QCResult,
         )
     except Exception as e:
-        return None, {}, f"{type(e).__name__}: {e}"
+        # Strip Authorization/api-key substrings before storing -- SDK exception
+        # messages occasionally carry header echoes that we don't want to ship
+        # to a teammate via the readqc_failures.json bug-report path.
+        msg = f"{type(e).__name__}: {e}"
+        for redact in ("Authorization", "x-api-key", "sk-ant-"):
+            if redact in msg:
+                msg = msg.split(redact, 1)[0] + f"[{redact} redacted]"
+        return None, {}, msg[:300]
 
     usage = {
         "input_tokens": resp.usage.input_tokens,
@@ -245,15 +252,17 @@ def load_target_photos(n_limit: int | None) -> list[tuple[str, str]]:
                     pass
 
     todo_ids = reps - done
+    if not todo_ids:
+        return []
 
+    # Filter in Python: SQLite has a 999-host-parameter limit and we routinely
+    # have ~3,200 representative photo_ids. The manifest has ~3,200 rows, so
+    # a full scan + Python-side membership check is cheap and avoids the limit.
     conn = sqlite3.connect(MANIFEST_DB)
-    rows = conn.execute(
-        f"SELECT photo_id, rel_path FROM photos WHERE photo_id IN ({','.join('?' * len(todo_ids))})",
-        tuple(todo_ids),
-    ).fetchall() if todo_ids else []
+    all_rows = conn.execute("SELECT photo_id, rel_path FROM photos").fetchall()
     conn.close()
-    # Deterministic order
-    rows.sort(key=lambda r: r[0])
+    rows = [r for r in all_rows if r[0] in todo_ids]
+    rows.sort(key=lambda r: r[0])  # deterministic order
     if n_limit:
         rows = rows[:n_limit]
     return rows
