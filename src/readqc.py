@@ -43,6 +43,7 @@ import argparse
 import base64
 import json
 import os
+import random
 import sqlite3
 import sys
 import threading
@@ -286,13 +287,17 @@ def _score_with_retry(
         )
         if err is None or attempt == max_attempts - 1:
             return result, usage, err
+        # All matches go against the lowercased error for consistency —
+        # a previous version mixed case-sensitive and case-insensitive
+        # checks, which silently broke if the SDK ever changed exception
+        # capitalization.
         err_l = err.lower()
         retriable = (
-            "429" in err
+            "429" in err_l
             or "rate_limit" in err_l
-            or "RateLimitError" in err
-            or "Overloaded" in err
-            or "502" in err or "503" in err or "504" in err
+            or "ratelimiterror" in err_l
+            or "overloaded" in err_l
+            or "502" in err_l or "503" in err_l or "504" in err_l
             or "bad gateway" in err_l
             or "internalservererror" in err_l
             or "apiconnectionerror" in err_l
@@ -300,7 +305,11 @@ def _score_with_retry(
         )
         if not retriable:
             return result, usage, err
-        time.sleep(2.0 * (2 ** attempt))  # 2s, 4s, 8s
+        # Geometric backoff (2s, 4s, 8s) with ±25% jitter so 8 workers
+        # that all hit the same 429 don't retry in lockstep and re-trip
+        # the rate limit.
+        base = 2.0 * (2 ** attempt)
+        time.sleep(base * random.uniform(0.75, 1.25))
     return None, {}, "exhausted retries"
 
 
@@ -362,7 +371,6 @@ def run_batch(
     state_lock = threading.Lock()
     file_lock = threading.Lock()
     cost_exceeded = threading.Event()
-    out_fh = READQC_JSONL.open("a", encoding="utf-8")
 
     def process_one(idx: int, photo_id: str, rel_path: str) -> dict | None:
         """Score one photo. Returns the row dict on success, None on
@@ -429,7 +437,11 @@ def run_batch(
             )
         return row
 
+    # Open the output file inside the try so an early raise during
+    # pre-warm doesn't leak the handle.
+    out_fh = None
     try:
+        out_fh = READQC_JSONL.open("a", encoding="utf-8")
         # Pre-warm the cache with the first photo: one sync call before
         # the pool fans out, so subsequent workers hit cache_read pricing.
         first_pid, first_rel = targets[0]
@@ -439,20 +451,37 @@ def run_batch(
         # GIL-friendly httpx I/O concurrent without async-ifying anything.
         rest = targets[1:]
         if rest and not cost_exceeded.is_set() and n_workers > 1:
+            # Map future -> (idx, pid, rel) so a raised worker exception
+            # can be recorded against the photo it was scoring rather
+            # than vanishing into stderr (the human-logged stages contract
+            # in CLAUDE.md says every photo's outcome must be tracked).
             with ThreadPoolExecutor(max_workers=n_workers) as ex:
-                futures = [
-                    ex.submit(process_one, idx, pid, rel)
+                fut_meta: dict = {
+                    ex.submit(process_one, idx, pid, rel): (idx, pid, rel)
                     for idx, (pid, rel) in enumerate(rest, 2)
-                ]
-                for _fut in as_completed(futures):
-                    # Result is already written / state already updated by
-                    # the worker; we just iterate to surface any raised
-                    # exceptions (and to keep the loop alive).
+                }
+                for fut in as_completed(fut_meta):
+                    idx, pid, rel = fut_meta[fut]
                     try:
-                        _fut.result()
+                        fut.result()
                     except Exception as e:  # noqa: BLE001
-                        print(f"[readqc] worker raised: "
-                              f"{type(e).__name__}: {e}", file=sys.stderr)
+                        err_msg = f"worker_raised: {type(e).__name__}: {e}"
+                        with state_lock:
+                            failures.append({
+                                "photo_id": pid,
+                                "rel_path": rel,
+                                "error": err_msg[:300],
+                            })
+                            completed += 1
+                        log_event(
+                            "readqc", "worker_raised",
+                            photo_id=pid, error_class=type(e).__name__,
+                        )
+                        print(
+                            f"[readqc] worker raised on {pid[:10]}: "
+                            f"{type(e).__name__}: {e}",
+                            file=sys.stderr,
+                        )
         elif rest:
             # Sequential fallback (--workers 1). Preserves prior behavior.
             for idx, (pid, rel) in enumerate(rest, 2):
@@ -460,7 +489,8 @@ def run_batch(
                     break
                 process_one(idx, pid, rel)
     finally:
-        out_fh.close()
+        if out_fh is not None:
+            out_fh.close()
 
     if cost_exceeded.is_set():
         print(f"[readqc] HALT: cost ${total_cost:.2f} exceeded "
