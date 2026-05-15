@@ -46,6 +46,7 @@ from pathlib import Path
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
     os.environ.setdefault(_v, "1")
 
+from src.audit import log_event, log_stage_end, log_stage_start
 from src.paths import FORENSICS_JSONL, MANIFEST_DB, PHOTOS_DIR, ensure_dirs
 
 PHASH_HAMMING_THRESHOLD = 6
@@ -124,6 +125,7 @@ def compute_phashes_and_ela(workers: int = 4) -> list[dict]:
             except Exception as e:
                 pid, rp = futures[fut]
                 print(f"[forensics] FAIL {rp}: {type(e).__name__}: {e}")
+                log_event("forensics", "phash_fail", photo_id=pid, error_class=type(e).__name__)
             if i % 200 == 0 or i == total:
                 rate = i / (time.time() - t0)
                 print(f"[forensics]   {i}/{total} ({rate:.1f}/s)")
@@ -220,6 +222,8 @@ def main() -> int:
         print("[forensics] manifest.sqlite missing -- run `python -m src.ingest` first", file=sys.stderr)
         return 1
 
+    log_stage_start("forensics", workers=4, hamming_threshold=PHASH_HAMMING_THRESHOLD,
+                    ela_threshold=ELA_THRESHOLD)
     rows = compute_phashes_and_ela(workers=4)
     cluster_map = cluster_phashes(rows)
     reps = pick_representatives(cluster_map)
@@ -240,6 +244,8 @@ def main() -> int:
     print(f"[forensics] pHash merged {n_total - n_reps} extra photos into {n_multi} multi-member clusters")
     if samples:
         print(f"[forensics]   largest multi-clusters (cid, size): {samples}")
+    log_stage_end("forensics", n_total=n_total, n_clusters=n_clusters, n_reps=n_reps,
+                  n_ela_flagged=n_ela, n_multi_clusters=n_multi)
     return 0
 
 

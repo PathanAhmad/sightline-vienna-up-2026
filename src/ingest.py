@@ -31,6 +31,7 @@ import warnings
 from pathlib import Path
 from typing import Iterator
 
+from src.audit import audit_reset, log_event, log_stage_end, log_stage_start
 from src.paths import (
     CLUSTER_GEOJSON,
     FCPS_GEOJSON,
@@ -64,6 +65,8 @@ def sha1_bytes(path: Path, chunk: int = 1 << 20) -> str:
 def build_manifest() -> int:
     """Walk PHOTOS_DIR, write rows to manifest.sqlite. Return row count."""
     ensure_dirs()
+    audit_reset()  # ingest is the first stage -- start a fresh audit log
+    log_stage_start("ingest", photos_dir=str(PHOTOS_DIR))
     if MANIFEST_DB.exists():
         MANIFEST_DB.unlink()
     conn = sqlite3.connect(MANIFEST_DB)
@@ -92,6 +95,7 @@ def build_manifest() -> int:
             except sqlite3.IntegrityError:
                 # Byte-identical duplicate. Rare but possible (file copied twice in dataset).
                 collisions += 1
+                log_event("ingest", "byte_identical_skip", photo_id=pid, filename=p.name)
     conn.execute("CREATE INDEX idx_photos_filename ON photos(filename)")
     conn.close()
     if collisions:
@@ -169,6 +173,7 @@ def main() -> int:
         f"{len(cluster)} cluster polygon ({dt_g:.1f}s)"
     )
     print(f"[ingest] trenches by FCP: {fcp_counts}")
+    log_stage_end("ingest", n_photos=n_photos, n_trenches=len(trenches), trenches_by_fcp=fcp_counts)
     return 0
 
 

@@ -58,6 +58,7 @@ import json
 import sys
 from collections import defaultdict
 
+from src.audit import log_event, log_stage_end, log_stage_start
 from src.ingest import load_geo
 from src.paths import (
     FORENSICS_JSONL,
@@ -184,6 +185,10 @@ def main() -> int:
         print("[classify] need readqc.jsonl, geomatch.csv, forensics.jsonl -- run earlier stages first", file=sys.stderr)
         return 1
 
+    log_stage_start("classify",
+                    green_max_gap_m=GREEN_MAX_GAP_M,
+                    red_min_density_per_m=RED_MIN_DENSITY_PER_M,
+                    max_snap_distance_m=MAX_SNAP_DISTANCE_M)
     print("[classify] loading geo + intermediate rows ...")
     trenches, _fcps, _cluster = load_geo()
     trenches_utm = trenches.to_crs(epsg=UTM_EPSG)
@@ -232,10 +237,12 @@ def main() -> int:
         seg_id = geo.get("segment_id") or ""
         if not seg_id:
             n_skipped_no_seg += 1
+            log_event("classify", "drop_no_segment", photo_id=pid)
             continue
         qc = readqc_for(pid)
         if qc is None:
             n_skipped_no_qc += 1
+            log_event("classify", "drop_no_qc", photo_id=pid)
             continue
         cid = forensics.get(pid, {}).get("phash_cluster_id", -1)
         compliant, reasons = is_photo_compliant(qc, geo)
@@ -322,6 +329,9 @@ def main() -> int:
     print(
         f"[classify] skipped: {n_skipped_no_seg} no segment, {n_skipped_no_qc} no readqc row"
     )
+    log_stage_end("classify", n_segments=len(rows_out),
+                  n_green=counter["GREEN"], n_yellow=counter["YELLOW"], n_red=counter["RED"],
+                  n_skipped_no_segment=n_skipped_no_seg, n_skipped_no_qc=n_skipped_no_qc)
     return 0
 
 

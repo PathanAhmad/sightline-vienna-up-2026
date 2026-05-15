@@ -51,6 +51,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src.audit import log_event, log_stage_end, log_stage_start
 from src.paths import (
     EXEMPLARS_DIR,
     FORENSICS_JSONL,
@@ -287,6 +288,7 @@ def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
         return 0
 
     print(f"[readqc] {len(targets)} photos -> {model}, cost ceiling ${max_cost_usd:.2f}")
+    log_stage_start("readqc", model=model, n_targets=len(targets), max_cost_usd=max_cost_usd)
 
     failures: list[dict] = []
     total_cost = 0.0
@@ -301,6 +303,8 @@ def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
 
             if err:
                 failures.append({"photo_id": photo_id, "rel_path": rel_path, "error": err})
+                err_class = err.split(":", 1)[0] if ":" in err else err[:40]
+                log_event("readqc", "api_fail", photo_id=photo_id, error_class=err_class)
                 print(f"[readqc] [{i:>4}/{len(targets)}] FAIL {photo_id[:10]} {err[:80]}")
                 continue
 
@@ -325,6 +329,9 @@ def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
 
             if total_cost > max_cost_usd:
                 print(f"[readqc] HALT: cost ${total_cost:.2f} exceeded ceiling ${max_cost_usd:.2f}")
+                log_event("readqc", "cost_ceiling_hit",
+                          total_cost_usd=round(total_cost, 4), max_cost_usd=max_cost_usd,
+                          photos_done=i, photos_remaining=len(targets) - i)
                 break
 
     if failures:
@@ -341,6 +348,8 @@ def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
         print(f"[readqc] {len(failures)} failures -> {READQC_FAILURES_JSON.name}")
 
     print(f"[readqc] done. total cost ${total_cost:.3f}, {time.time() - t0:.1f}s")
+    log_stage_end("readqc", total_cost_usd=round(total_cost, 4),
+                  n_failures=len(failures), elapsed_s=round(time.time() - t0, 1))
     return 0
 
 

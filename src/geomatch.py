@@ -49,6 +49,7 @@ from typing import Iterable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from src.audit import log_event, log_stage_end, log_stage_start
 from src.ingest import load_geo
 from src.paths import (
     FORENSICS_JSONL,
@@ -217,6 +218,7 @@ class Geocoder:
             # end up in screenshots, demo recordings, or pasted bug reports).
             redacted = (key[:3] + "...") if len(key) > 3 else "..."
             print(f"[geomatch] Nominatim error on addr={redacted!r}: {type(e).__name__}", file=sys.stderr)
+            log_event("geomatch", "nominatim_fail", addr_prefix=redacted, error_class=type(e).__name__)
             return None
         self._last_call = time.time()
         # Cache even null results so we don't retry every run
@@ -322,6 +324,7 @@ def main() -> int:
         print(f"[geomatch] {READQC_JSONL.name} missing -- run readqc first", file=sys.stderr)
         return 1
 
+    log_stage_start("geomatch", utm_epsg=UTM_EPSG, mismatch_threshold_m=LATLON_VS_ADDRESS_DIST_M)
     print("[geomatch] loading geo + readqc rows ...")
     trenches, fcps, cluster = load_geo()
     trenches_utm = _project_to_utm(trenches)
@@ -376,6 +379,8 @@ def main() -> int:
                 "label_match": "no_label", "latlon_vs_address_flag": False,
             })
             n_none += 1
+            log_event("geomatch", "drop_no_coords", photo_id=photo_id,
+                      had_address=bool(address), had_overlay_latlon=bool(qc.get("overlay_latlon")))
             continue
 
         # Project to UTM for the snap math
@@ -386,6 +391,7 @@ def main() -> int:
         fcp_name, fcp_mode = _assign_fcp(point_utm, fcps_utm, cluster_utm)
         if fcp_mode == "off_cluster":
             n_off_cluster += 1
+            log_event("geomatch", "off_cluster", photo_id=photo_id, nearest_fcp=fcp_name)
         candidates = trenches_by_fcp.get(fcp_name, trenches_utm)
         if candidates.empty:
             candidates = trenches_utm
@@ -405,6 +411,8 @@ def main() -> int:
                 if d > LATLON_VS_ADDRESS_DIST_M and streets_disagree(address, geocoded_x.get("road", "")):
                     flag = True
                     n_flag += 1
+                    log_event("geomatch", "latlon_address_mismatch", photo_id=photo_id,
+                              dist_m=round(d, 1))
 
         # Paper label consistency
         pl = parse_paper_label(qc.get("paper_label_code"))
@@ -418,6 +426,10 @@ def main() -> int:
                 label_match = "r_mismatch"
             else:
                 label_match = "ok"
+            if label_match != "ok":
+                log_event("geomatch", "label_mismatch", photo_id=photo_id,
+                          kind=label_match, paper_f=f_code, paper_r=r_code,
+                          snapped_fcp=snapped_fcp, snapped_r=snapped_r)
 
         rep_rows.append({
             "photo_id": photo_id,
@@ -474,6 +486,9 @@ def main() -> int:
         f"[geomatch] overlay_latlon={n_overlay}, geocoded={n_geocoded}, "
         f"none={n_none}, off_cluster={n_off_cluster}, mismatch_flag={n_flag}"
     )
+    log_stage_end("geomatch", n_total_rows=len(all_rows), n_reps=len(rep_rows),
+                  n_overlay=n_overlay, n_geocoded=n_geocoded, n_no_coords=n_none,
+                  n_off_cluster=n_off_cluster, n_latlon_address_mismatch=n_flag)
     return 0
 
 

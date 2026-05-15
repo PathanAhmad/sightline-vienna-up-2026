@@ -198,8 +198,14 @@ def build_map(
         "features": [],
     }
     for feat in trenches["features"]:
-        seg_id = feat["properties"].get("globalID") or feat["properties"].get(
-            "segment_id"
+        # Real Trenches.geojson uses `externalID` (verified 2026-05-15);
+        # `globalID` and `segment_id` are kept as fallbacks for the demo
+        # fixtures, which were authored against the original PLAN naming.
+        props = feat["properties"]
+        seg_id = (
+            props.get("externalID")
+            or props.get("globalID")
+            or props.get("segment_id")
         )
         v_row = verdicts_by_segment.get(seg_id, {})
         verdict = v_row.get("verdict", "RED")
@@ -297,8 +303,43 @@ PHOTO_CHECK_FIELDS = [
     ("depth_reference_visible", "Depth ref"),
     ("duct_visible", "Duct"),
     ("pipe_ends_sealed", "Pipe ends sealed"),
-    ("personal_data_visible", "Personal data"),
+    # NOTE: `personal_data_visible` intentionally NOT in this list. It is
+    # the redaction trigger (see render_personal_data_redaction below), not
+    # a check that the reviewer needs to see displayed.
 ]
+
+
+def render_personal_data_redaction(pid: str, qc: dict, segment_t: float) -> None:
+    """Render a GDPR notice card in place of a photo flagged with personal
+    data. Replaces both the image bytes AND the per-photo check chips so
+    nothing about the original photo's contents bleeds into the demo screen.
+
+    Policy reversal documented in DECISIONS.md (2026-05-15 Saturday): the
+    original 'flag, don't redact' approach was correct for compliance
+    bookkeeping, but a screen-recorded demo of a tool that talks about
+    NIS2 / GDPR while displaying a worker's face is a bad look. We now
+    withhold the image at display time, surface the withholding visibly,
+    and route the photo to the retake bucket the same way as before.
+    """
+    st.markdown(
+        f"<div style='background:#fef3c7;border:1.5px solid #f59e0b;"
+        f"padding:18px;border-radius:6px;text-align:center;color:#78350f;"
+        f"min-height:160px;display:flex;flex-direction:column;"
+        f"justify-content:center;'>"
+        f"<div style='font-size:28px;line-height:1;'>&#x1F6AB;</div>"
+        f"<div style='font-weight:600;margin-top:6px;'>Image withheld</div>"
+        f"<div style='font-size:12px;margin-top:4px;'>"
+        f"Personal data detected (face / licence plate). "
+        f"Withheld per GDPR / NIS2.</div>"
+        f"<div style='font-size:11px;margin-top:6px;color:#92400e;'>"
+        f"Routed to contractor retake bucket.</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"phase: **{qc.get('phase','?')}** · pos {segment_t:.0%} "
+        f"· id `{pid[:10]}…`"
+    )
 
 
 def photo_path_for(photo_id: str, manifest: dict, photos_root: Path) -> Path | None:
@@ -417,6 +458,19 @@ def render_segment_panel(
         for col, row in zip(cols, photos[i:i + 2]):
             pid = row["photo_id"]
             with col:
+                qc, dup_of = resolve_qc(
+                    pid, readqc_by_id, forensics_by_id, rep_by_cluster
+                )
+                # GDPR / NIS2 redaction. Photos flagged personal_data_visible
+                # NEVER show their image bytes in the demo surface; the rest
+                # of the per-photo card (chips, ELA, geo flag) is also
+                # suppressed since it would reveal what's in the frame.
+                if qc and qc.get("personal_data_visible") == "yes":
+                    render_personal_data_redaction(
+                        pid, qc, float(row.get("segment_t") or 0.0)
+                    )
+                    continue
+
                 img_path = photo_path_for(pid, manifest, photos_root)
                 if img_path:
                     st.image(str(img_path), width="stretch")
@@ -427,9 +481,6 @@ def render_segment_panel(
                         f"image unavailable<br><small>{pid[:24]}…</small></div>",
                         unsafe_allow_html=True,
                     )
-                qc, dup_of = resolve_qc(
-                    pid, readqc_by_id, forensics_by_id, rep_by_cluster
-                )
                 fo = forensics_by_id.get(pid, {})
                 if qc:
                     st.caption(f"phase: **{qc.get('phase','?')}** · pos "
@@ -526,9 +577,9 @@ def render_header(
              "#dc2626"))
     if n_personal_data:
         chips.append(
-            (f"{n_personal_data} personal-data flag"
-             f"{'s' if n_personal_data != 1 else ''} "
-             f"(NIS2 — needs retake)",
+            (f"{n_personal_data} photo"
+             f"{'s' if n_personal_data != 1 else ''} withheld "
+             f"(GDPR / NIS2 — face or licence plate)",
              "#0891b2"))
     if n_ela:
         chips.append(

@@ -32,10 +32,12 @@ Two layers — both need to be green for a segment to be GREEN:
 
 **How Layer B feeds Layer A.** A photo counts as **compliant** for the 5m density rule if ALL of these hold:
 - `relevance = scorable` (the relevance gate passed)
-- `personal_data_visible = no` (NIS2 clean)
+- `personal_data_visible = no` (GDPR / NIS2 clean — see "Personal-data display policy" below)
 - It is NOT a duplicate of another photo we've already counted (check 5)
 - Its overlay address / lat/lon snapped to a segment without a >150m disagreement (check 6 passed)
 - The phase-relevant subset of `{warning_tape, sand_bedding, side_view, depth_reference, duct, pipe_ends_sealed}` is all `yes` (treating `occluded` as a partial credit, not pass)
+
+**Personal-data display policy (revised 2026-05-15 Saturday).** The original "flag-only, don't pixel-redact" decision is correct for backend bookkeeping but unsafe for a screen-recorded demo: Streamlit would render a worker's face on screen while the same UI talks about NIS2 compliance. Revised policy: photos with `personal_data_visible = "yes"` are **withheld at display time** in the photo grid — `app.py` shows a GDPR notice card instead of the image bytes. The photo still appears in the segment's `photo_count` and in `personal_data.csv` (retake bucket); the only change is the image bytes are never rendered.
 
 A `scorable` photo that fails any of the above is counted as "photo present but quality insufficient" (the YELLOW driver). A photo that fails the relevance gate is dropped from the segment entirely (logged in a separate bucket).
 
