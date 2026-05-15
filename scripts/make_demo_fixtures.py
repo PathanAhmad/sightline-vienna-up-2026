@@ -608,29 +608,62 @@ def write_geomatch(photo_specs: list[dict], segments: list[dict], path: Path) ->
 
 def write_verdicts(photo_specs: list[dict], segments: list[dict], path: Path) -> None:
     """Roll up per-segment verdict for the fixture. Encoded by hand to
-    match the story comments above — not a real Layer A/B rollup."""
-    story = {
-        "S001": ("GREEN", "all checks ok; 3 compliant photos covering 40m"),
-        "S002": ("GREEN", "all checks ok; 3 compliant photos covering 40m"),
-        "S003": ("GREEN", "all checks ok; 3 compliant photos covering 40m"),
-        "S004": ("YELLOW", "max gap 26m > 5m between meter 2 and meter 28"),
-        "S005": ("YELLOW", "1 personal-data photo excluded; 1 off-topic photo excluded; no other photos"),
-        "S006": ("YELLOW", "duplicate photo reused on this segment (1 representative, 1 inherited duplicate)"),
-        "S007": ("GREEN", "3 compliant photos; 1 photo ELA-flagged (kept; soft warning)"),
-        "S008": ("YELLOW", "lat/lon and printed address disagree by 1.7 km (off-cluster)"),
-        "S009": ("RED",   "no photos snapped to this segment"),
-        "S010": ("RED",   "no photos snapped to this segment"),
-        "S011": ("GREEN", "all checks ok; 3 compliant photos"),
-        "S012": ("RED",   "no photos snapped to this segment"),
-        "S013": ("RED",   "no photos snapped to this segment"),
-        "S014": ("RED",   "no photos snapped to this segment"),
-        "S015": ("YELLOW", "tape_laid phase but warning tape not visible"),
-        "S016": ("RED",   "no photos snapped to this segment"),
-        "S017": ("RED",   "no photos snapped to this segment"),
-        "S018": ("RED",   "no photos snapped to this segment"),
-        "S019": ("RED",   "no photos snapped to this segment"),
-        "S020": ("RED",   "no photos snapped to this segment"),
+    match the story comments above — not a real Layer A/B rollup.
+
+    Length-dependent prose ("covering 40m", S004's "between meter 2 and
+    meter 28") is derived from each segment's actual length so future
+    geometry tweaks in build_trench_geometry don't desync the verdict
+    text."""
+    # Verdict per segment is fixed; the reason text is templated below.
+    verdict_by_sid = {
+        "S001": "GREEN",  "S002": "GREEN",  "S003": "GREEN",
+        "S004": "YELLOW", "S005": "YELLOW", "S006": "YELLOW",
+        "S007": "GREEN",  "S008": "YELLOW",
+        "S009": "RED",    "S010": "RED",    "S011": "GREEN",
+        "S012": "RED",    "S013": "RED",    "S014": "RED",
+        "S015": "YELLOW",
+        "S016": "RED",    "S017": "RED",    "S018": "RED",
+        "S019": "RED",    "S020": "RED",
     }
+
+    def reason_for(sid: str, verdict: str, length_m: float) -> str:
+        length_str = f"{round(length_m)}m"
+        if verdict == "RED":
+            return "no photos snapped to this segment"
+        if sid == "S004":
+            # Two photos at t=0.05 and t=0.70 → gap is ~65% of length.
+            m_a = round(length_m * 0.05)
+            m_b = round(length_m * 0.70)
+            return (
+                f"max gap {m_b - m_a}m > 5m "
+                f"between meter {m_a} and meter {m_b}"
+            )
+        if sid == "S005":
+            return ("1 personal-data photo excluded; "
+                    "1 off-topic photo excluded; no other photos")
+        if sid == "S006":
+            return ("duplicate photo reused on this segment "
+                    "(1 representative, 1 inherited duplicate)")
+        if sid == "S007":
+            return (f"3 compliant photos covering {length_str}; "
+                    f"1 photo ELA-flagged (kept; soft warning)")
+        if sid == "S008":
+            return "lat/lon and printed address disagree by 1.7 km (off-cluster)"
+        if sid == "S015":
+            return "tape_laid phase but warning tape not visible"
+        # Default GREEN reason (S001/S002/S003/S011).
+        return f"all checks ok; 3 compliant photos covering {length_str}"
+
+    def max_gap_for(sid: str, verdict: str, length_m: float) -> float:
+        if verdict == "RED":
+            return float(length_m)
+        if sid == "S004":
+            # Matches the meter-positions used in reason_for above.
+            return round(length_m * 0.65, 1)
+        if verdict == "YELLOW":
+            return 12.0
+        return 4.0  # GREEN
+
     photo_counts: dict[str, int] = {}
     for spec in photo_specs:
         photo_counts[spec["segment_id"]] = photo_counts.get(spec["segment_id"], 0) + 1
@@ -644,22 +677,21 @@ def write_verdicts(photo_specs: list[dict], segments: list[dict], path: Path) ->
         w.writerow(fields)
         for s in segments:
             sid = s["segment_id"]
-            verdict, reasons = story[sid]
+            verdict = verdict_by_sid[sid]
+            length_m = s["length_m"]
             photos = photo_counts.get(sid, 0)
             compliant = {
                 "GREEN": photos,
                 "YELLOW": max(photos - 1, 0),
                 "RED": 0,
             }[verdict]
-            density = compliant / (s["length_m"] / 5) if s["length_m"] else 0.0
-            max_gap = {
-                "GREEN": 4.0,
-                "YELLOW": 26.0 if sid == "S004" else 12.0,
-                "RED": float(s["length_m"]),
-            }[verdict]
+            density = compliant / (length_m / 5) if length_m else 0.0
             w.writerow([
-                sid, s["fcp_name"], s["length_m"], photos, compliant,
-                f"{max_gap:.1f}", f"{density:.2f}", verdict, reasons,
+                sid, s["fcp_name"], length_m, photos, compliant,
+                f"{max_gap_for(sid, verdict, length_m):.1f}",
+                f"{density:.2f}",
+                verdict,
+                reason_for(sid, verdict, length_m),
             ])
 
 
@@ -689,7 +721,7 @@ def main() -> int:
     n_reps = sum(1 for s in photo_specs if s.get("is_representative", True))
     print(
         f"[fixtures] wrote {n_segments} segments, {n_photos} photo records "
-        f"({n_reps} reps, {n_photos - n_reps} duplicates) → {FIXTURES_DIR.relative_to(REPO_ROOT)}/"
+        f"({n_reps} reps, {n_photos - n_reps} duplicates) -> {FIXTURES_DIR.relative_to(REPO_ROOT)}/"
     )
     return 0
 
