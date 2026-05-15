@@ -52,6 +52,7 @@ One line per decision. Timestamped. No re-litigating.
 - **2026-05-15 late** FCP polygon coverage analysis: union of 9 FCP polygons = 102.8% of SiteCluster (covers more area than the cluster itself), but with 18.7% gap inside the cluster and 21.5% spill outside. **Implication for geomatch:** point-in-polygon alone misses ~19% of addresses that fall in FCP gaps; need a `nearest_fcp_polygon` fallback. Spill outside the cluster is OK — those points still get an FCP assignment, just flagged as edge-of-zone.
 - **2026-05-15 late** Slide 4 of `oegig_ai_qc_presentation.pptx` decoded by layout, not just text: left half = COMPLIANT example with 3 ✓ items (GPS, duct, sand); right half = NON-COMPLIANT example with 3 ✗ items (pipe ends sealed missing, ruler unreadable, persons/plates visible). Six photo-compliance criteria total. Combined with the 5 APG-brief checks (warning tape, sand, side view, depth, GPS-consistent + duplicate-detection in the forensics layer), we score against 8 photo-level checks.
 - **2026-05-15 late** Smaller PPT media (2-13 KB PNGs) are decorations and the ÖGIG logo. No additional rubric content.
+- **2026-05-15 Saturday AM** `segment_id` in the data contracts = `externalID` from Trenches.geojson (PLAN.md previously said `globalID` — that field doesn't exist in the file we got). Format: `SDIRouteSection_<digits>_<digits>`. Affects geomatch.csv + verdicts.csv consumers (app.py).
 
 ### Open questions for Martin Fuhrmann (pitch/positioning — NOT technical blockers)
 

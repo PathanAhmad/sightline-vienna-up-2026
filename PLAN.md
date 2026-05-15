@@ -178,7 +178,7 @@ One row per photo (representative + duplicates inherit). Reads `readqc.jsonl` + 
 | `photo_id` | str | matches `manifest.sqlite` |
 | `lat`, `lon` | float \| empty | decimal degrees parsed from `overlay_latlon`, or geocoded from `overlay_address` |
 | `coord_source` | enum | `overlay_latlon` / `geocoded_address` / `none` |
-| `segment_id` | str \| empty | snapped LineString's `globalID` from Trenches.geojson |
+| `segment_id` | str \| empty | snapped LineString's `externalID` from Trenches.geojson (e.g. `SDIRouteSection_10985384961_1726897473` — the only unique identifier in the file) |
 | `segment_t` | float | position along the segment as a fraction 0..1 (so we can sort photos along the segment) |
 | `snap_distance_m` | float | how far the photo's point was from the LineString it snapped to |
 | `fcp_name` | str \| empty | FCP polygon that contains the point (or nearest, if in a gap) |
@@ -192,7 +192,7 @@ One row per LineString segment (2,983 rows). Reads `readqc.jsonl` + `geomatch.cs
 
 | column | type | meaning |
 |---|---|---|
-| `segment_id` | str | LineString globalID |
+| `segment_id` | str | LineString `externalID` from Trenches.geojson |
 | `fcp_name` | str | parent FCP |
 | `length_m` | float | segment length in meters |
 | `photo_count` | int | photos snapped to this segment (after dedup) |
