@@ -8,6 +8,10 @@
 *.png
 linkedin-profile-snapshot.md
 
+# Partner-provided data (NDA on route info per the brief)
+Resources/
+.audit_samples/
+
 # Python / uv
 .venv/
 __pycache__/
