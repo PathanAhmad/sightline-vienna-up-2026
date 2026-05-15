@@ -1,0 +1,17 @@
+# Pinned theme for the demo. The pitch will be projected; light reads
+# better on a projector than dark, and pinning removes the risk of
+# whoever boots the demo having dark mode enabled in their browser.
+
+[theme]
+base = "light"
+primaryColor = "#0ea5e9"          # sky-500 — accent
+backgroundColor = "#f8fafc"       # slate-50 — page bg
+secondaryBackgroundColor = "#ffffff"  # card surfaces
+textColor = "#0f172a"             # slate-900
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
