@@ -1,0 +1,445 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S001",
+        "fcpName": "F001",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.287382198952878,
+            46.555
+          ],
+          [
+            14.287905759162303,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S002",
+        "fcpName": "F001",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.287905759162303,
+            46.555
+          ],
+          [
+            14.288429319371726,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S003",
+        "fcpName": "F001",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.288429319371726,
+            46.555
+          ],
+          [
+            14.288952879581151,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S004",
+        "fcpName": "F001",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.288952879581151,
+            46.555
+          ],
+          [
+            14.289476439790574,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S005",
+        "fcpName": "F001",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.289476439790574,
+            46.555
+          ],
+          [
+            14.29,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S006",
+        "fcpName": "F002",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.29,
+            46.555
+          ],
+          [
+            14.290523560209422,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S007",
+        "fcpName": "F002",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.290523560209422,
+            46.555
+          ],
+          [
+            14.291047120418847,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S008",
+        "fcpName": "F002",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.291047120418847,
+            46.555
+          ],
+          [
+            14.29157068062827,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S009",
+        "fcpName": "F002",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.29157068062827,
+            46.555
+          ],
+          [
+            14.292094240837695,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S010",
+        "fcpName": "F002",
+        "ductMainShort": "R001",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292094240837695,
+            46.555
+          ],
+          [
+            14.292617801047118,
+            46.555
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S011",
+        "fcpName": "F002",
+        "ductMainShort": "R002",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.555
+          ],
+          [
+            14.292617801047118,
+            46.55536036036036
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S012",
+        "fcpName": "F002",
+        "ductMainShort": "R002",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55536036036036
+          ],
+          [
+            14.292617801047118,
+            46.55572072072072
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S013",
+        "fcpName": "F002",
+        "ductMainShort": "R002",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55572072072072
+          ],
+          [
+            14.292617801047118,
+            46.55608108108108
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S014",
+        "fcpName": "F002",
+        "ductMainShort": "R002",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55608108108108
+          ],
+          [
+            14.292617801047118,
+            46.55644144144144
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S015",
+        "fcpName": "F002",
+        "ductMainShort": "R002",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55644144144144
+          ],
+          [
+            14.292617801047118,
+            46.556801801801804
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S016",
+        "fcpName": "F002",
+        "ductMainShort": "R003",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.555
+          ],
+          [
+            14.292617801047118,
+            46.55463963963964
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S017",
+        "fcpName": "F002",
+        "ductMainShort": "R003",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55463963963964
+          ],
+          [
+            14.292617801047118,
+            46.55427927927928
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S018",
+        "fcpName": "F002",
+        "ductMainShort": "R003",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55427927927928
+          ],
+          [
+            14.292617801047118,
+            46.55391891891892
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S019",
+        "fcpName": "F002",
+        "ductMainShort": "R003",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55391891891892
+          ],
+          [
+            14.292617801047118,
+            46.55355855855856
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "globalID": "S020",
+        "fcpName": "F002",
+        "ductMainShort": "R003",
+        "length_m": 40.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.292617801047118,
+            46.55355855855856
+          ],
+          [
+            14.292617801047118,
+            46.553198198198196
+          ]
+        ]
+      }
+    }
+  ]
+}
