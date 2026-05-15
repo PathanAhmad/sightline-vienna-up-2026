@@ -12,6 +12,8 @@ linkedin-profile-snapshot.md
 Resources/
 data/
 .audit_samples/
+# Spike / batch outputs contain real addresses + lat/lon — same NDA
+scripts/out/
 
 # Local MCP config — contains API keys, never commit
 .mcp.json
