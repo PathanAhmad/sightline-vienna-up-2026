@@ -18,6 +18,9 @@ scripts/out/
 # Local MCP config — contains API keys, never commit
 .mcp.json
 
+# Anthropic / partner keys live here, never commit
+.env
+
 # Python / uv
 .venv/
 __pycache__/

@@ -104,6 +104,114 @@ data/              # gitignored — Fotos/, Beispiele/, geo/
 
 Each stage prints what it did in plain English. Example: `[readqc] 3,372 photos scored, 9 parse failures → readqc_failures.json` and `[geomatch] 2,948 snapped to segment, 384 FCP-only (gap), 17 off-cluster → geomatch.csv`.
 
+## Data contracts (locked — don't change without saying so)
+
+Every stage reads one or two files and writes exactly one. Column names, JSON keys, and file paths are fixed so two people can work on different stages in parallel without colliding.
+
+All intermediate files live under `data/processed/` (gitignored). Photo paths are stored **relative** to `data/Fotos/Fotos/` so the manifest survives a move.
+
+### 1. ingest → `data/processed/manifest.sqlite`
+
+One row per photo file on disk. The source of truth for "what photos exist."
+
+Table `photos`:
+| column | type | meaning |
+|---|---|---|
+| `photo_id` | TEXT PRIMARY KEY | sha1 of the file bytes — stable across renames |
+| `rel_path` | TEXT | path relative to `data/Fotos/Fotos/` (e.g. `WhatsApp Image 2024-08-26 at 20_50_39 (1).jpeg`) |
+| `filename` | TEXT | basename only — used to detect `N_` and `— копия` duplicate prefixes |
+| `bytes` | INTEGER | file size |
+| `mtime` | REAL | filesystem mtime, unix seconds |
+
+Plus loaded into memory (not persisted): `trenches_gdf` (2,983 LineStrings), `fcps_gdf` (9 polygons), `cluster_gdf` (1 polygon), all WGS84.
+
+### 2. forensics → `data/processed/forensics.jsonl`
+
+One JSON object per `photo_id`. Reads `manifest.sqlite`, writes one line per photo.
+
+```json
+{
+  "photo_id": "...",
+  "phash": "f0e1c2...",                  // 16-char hex perceptual hash
+  "phash_cluster_id": 42,                 // shared by all photos within Hamming-6 of each other; lowest photo_id wins as representative
+  "is_phash_representative": true,        // one true per cluster; only these go to readqc
+  "ela_score": 0.0731,                    // mean ELA delta — higher = more re-saved
+  "ela_flag": false                       // ela_score > THRESHOLD (set after calibration)
+}
+```
+
+### 3. readqc → `data/processed/readqc.jsonl`
+
+One JSON object per **representative** photo (i.e. `is_phash_representative=true` in forensics). Reads `forensics.jsonl` + the photo bytes from disk. Schema = the `QC_SCHEMA` block above, plus three bookkeeping fields:
+
+```json
+{
+  "photo_id": "...",
+  "model": "claude-sonnet-4-6",
+  "cost_usd": 0.0046,
+  "relevance": "scorable",
+  "phase": "duct_laid",
+  "warning_tape_visible": "no",
+  "sand_bedding_visible": "yes",
+  "side_view_present": "yes",
+  "depth_reference_visible": "no",
+  "depth_value_cm": null,
+  "duct_visible": "yes",
+  "pipe_ends_sealed": "occluded",
+  "personal_data_visible": "no",
+  "overlay_date": "26.08.2024 20:50",
+  "overlay_address": "11 Josef-Petritsch-Straße, Maria Rain, Kärnten, Austria",
+  "overlay_latlon": "46°33'29.30965\"N 14°17'23.54444\"E",
+  "paper_label_code": "F170-R084-11-or",
+  "note": "..."
+}
+```
+
+Photos with `is_phash_representative=false` inherit their representative's row at the rollup stage — they don't get their own readqc row.
+
+### 4. geomatch → `data/processed/geomatch.csv`
+
+One row per photo (representative + duplicates inherit). Reads `readqc.jsonl` + the trench/FCP GeoJSONs. CSV (not JSONL) because downstream is tabular.
+
+| column | type | meaning |
+|---|---|---|
+| `photo_id` | str | matches `manifest.sqlite` |
+| `lat`, `lon` | float \| empty | decimal degrees parsed from `overlay_latlon`, or geocoded from `overlay_address` |
+| `coord_source` | enum | `overlay_latlon` / `geocoded_address` / `none` |
+| `segment_id` | str \| empty | snapped LineString's `globalID` from Trenches.geojson |
+| `segment_t` | float | position along the segment as a fraction 0..1 (so we can sort photos along the segment) |
+| `snap_distance_m` | float | how far the photo's point was from the LineString it snapped to |
+| `fcp_name` | str \| empty | FCP polygon that contains the point (or nearest, if in a gap) |
+| `fcp_assignment` | enum | `inside_polygon` / `nearest_fallback` / `off_cluster` |
+| `label_match` | enum | `ok` / `fcp_mismatch` / `r_mismatch` / `no_label` — paper-label consistency vs snapped segment |
+| `latlon_vs_address_flag` | bool | true if geocoded address >150m from overlay coords AND different street |
+
+### 5. classify → `data/processed/verdicts.csv`
+
+One row per LineString segment (2,983 rows). Reads `readqc.jsonl` + `geomatch.csv` + `forensics.jsonl` + the geo data.
+
+| column | type | meaning |
+|---|---|---|
+| `segment_id` | str | LineString globalID |
+| `fcp_name` | str | parent FCP |
+| `length_m` | float | segment length in meters |
+| `photo_count` | int | photos snapped to this segment (after dedup) |
+| `compliant_photo_count` | int | photos that pass the "all checks ok" filter in Layer B |
+| `max_gap_m` | float | longest stretch without a compliant photo |
+| `density_photos_per_5m` | float | `compliant_photo_count / (length_m / 5)` |
+| `verdict` | enum | `GREEN` / `YELLOW` / `RED` |
+| `reasons` | str | semicolon-joined human-readable reasons (e.g. `"max gap 12m > 5m; 1 personal-data photo"`) |
+
+### 6. report → `data/processed/report/`
+
+Reads `verdicts.csv` + `geomatch.csv` + `readqc.jsonl`. Writes:
+- `deficiency.csv` — one row per RED or YELLOW segment with reasons, for the partner.
+- `not_classified.csv` — photos dropped by relevance gate (portrait/off_topic/unreadable).
+- `personal_data.csv` — photos flagged NIS2-sensitive.
+- `summary.html` — one-page overview shown alongside the live Streamlit map.
+
+Streamlit (`app.py`) reads the same files at startup. No live Claude calls during the demo.
+
 ## The geomatch redesign (corrected after PPT review)
 
 **Two earlier pivots and one correction:**

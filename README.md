@@ -34,7 +34,7 @@ uv sync                # install Python 3.11 deps from pyproject.toml
 streamlit run app.py   # once app.py exists
 ```
 
-Anthropic API key in `.env` (Claude Haiku 4.5 vision is the QC engine).
+Anthropic API key in `.env` (Claude Sonnet 4.6 vision is the QC engine — see DECISIONS.md for the Haiku-vs-Sonnet choice).
 
 ## Resources
 
