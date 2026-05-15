@@ -45,7 +45,9 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Literal
 
@@ -269,12 +271,68 @@ def load_target_photos(n_limit: int | None) -> list[tuple[str, str]]:
     return rows
 
 
-def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
-    import anthropic  # imported lazily so other stages don't pay the cost
+def _score_with_retry(
+    client, model, exemplar_prefix, photo_path: Path, max_attempts: int = 3,
+):
+    """One vision call, with retries on transient upstream errors:
+    429 rate-limit, 5xx (Cloudflare 502/503/504 are common when Anthropic's
+    edge can't reach origin), connection errors, and 'Overloaded'.
+    Anything else (auth, schema, bad image) is permanent — return immediately.
+
+    Backoff: 2s, 4s, 8s — geometric, capped at max_attempts."""
+    for attempt in range(max_attempts):
+        result, usage, err = score_one_photo(
+            client, model, exemplar_prefix, photo_path,
+        )
+        if err is None or attempt == max_attempts - 1:
+            return result, usage, err
+        err_l = err.lower()
+        retriable = (
+            "429" in err
+            or "rate_limit" in err_l
+            or "RateLimitError" in err
+            or "Overloaded" in err
+            or "502" in err or "503" in err or "504" in err
+            or "bad gateway" in err_l
+            or "internalservererror" in err_l
+            or "apiconnectionerror" in err_l
+            or "apitimeouterror" in err_l
+        )
+        if not retriable:
+            return result, usage, err
+        time.sleep(2.0 * (2 ** attempt))  # 2s, 4s, 8s
+    return None, {}, "exhausted retries"
+
+
+def run_batch(
+    model_key: str,
+    n_limit: int | None,
+    max_cost_usd: float,
+    n_workers: int = 8,
+) -> int:
+    """Score all not-yet-scored representative photos.
+
+    Parallelism: a thread pool of `n_workers` (default 8) drives sync
+    `client.messages.parse` calls — the Anthropic SDK is thread-safe per
+    its docs, and httpx pools connections under the hood. To avoid 8
+    concurrent requests each paying the cache-write surcharge (~$0.04
+    each), the first photo runs SEQUENTIALLY so the system+exemplar
+    prefix is warm before the pool fans out. Subsequent calls hit
+    cache_read pricing (~$0.011 vs $0.039 cold).
+
+    Cost ceiling: the per-worker total-cost check is guarded by a lock,
+    and the `cost_exceeded` event short-circuits new starts. Up to
+    `n_workers` in-flight calls may complete past the ceiling — fine for
+    a $40 budget, the worst-case overshoot is 8 × $0.011 ≈ $0.10.
+
+    Set `--workers 1` to force the old sequential behavior (useful for
+    debugging or when the SDK is misbehaving)."""
+    import anthropic  # lazy so other stages don't pay the cost
 
     load_env_key()
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("[readqc] ANTHROPIC_API_KEY not set and .env missing the entry", file=sys.stderr)
+        print("[readqc] ANTHROPIC_API_KEY not set and .env missing the entry",
+              file=sys.stderr)
         return 1
 
     ensure_dirs()
@@ -287,55 +345,128 @@ def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
         print("[readqc] nothing to do (all representatives already scored)")
         return 0
 
-    print(f"[readqc] {len(targets)} photos -> {model}, cost ceiling ${max_cost_usd:.2f}")
-    log_stage_start("readqc", model=model, n_targets=len(targets), max_cost_usd=max_cost_usd)
+    n_workers = max(1, n_workers)
+    print(
+        f"[readqc] {len(targets)} photos -> {model}, "
+        f"cost ceiling ${max_cost_usd:.2f}, workers={n_workers}"
+    )
+    log_stage_start(
+        "readqc", model=model, n_targets=len(targets),
+        max_cost_usd=max_cost_usd, n_workers=n_workers,
+    )
 
     failures: list[dict] = []
     total_cost = 0.0
+    completed = 0
     t0 = time.time()
+    state_lock = threading.Lock()
+    file_lock = threading.Lock()
+    cost_exceeded = threading.Event()
+    out_fh = READQC_JSONL.open("a", encoding="utf-8")
 
-    with READQC_JSONL.open("a", encoding="utf-8") as out:
-        for i, (photo_id, rel_path) in enumerate(targets, 1):
-            photo_path = PHOTOS_DIR / rel_path
-            t_start = time.time()
-            result, usage, err = score_one_photo(client, model, exemplar_prefix, photo_path)
-            dt = time.time() - t_start
+    def process_one(idx: int, photo_id: str, rel_path: str) -> dict | None:
+        """Score one photo. Returns the row dict on success, None on
+        failure / cost-ceiling skip. Writes to the JSONL and updates
+        shared state under locks."""
+        nonlocal total_cost, completed
+        if cost_exceeded.is_set():
+            return None
+        photo_path = PHOTOS_DIR / rel_path
+        result, usage, err = _score_with_retry(
+            client, model, exemplar_prefix, photo_path,
+        )
+        if err:
+            err_class = err.split(":", 1)[0] if ":" in err else err[:40]
+            with state_lock:
+                failures.append({
+                    "photo_id": photo_id,
+                    "rel_path": rel_path,
+                    "error": err,
+                })
+                completed += 1
+                done = completed
+            log_event("readqc", "api_fail",
+                      photo_id=photo_id, error_class=err_class)
+            print(f"[readqc] [{done:>4}/{len(targets)}] "
+                  f"FAIL {photo_id[:10]} {err[:80]}")
+            return None
 
-            if err:
-                failures.append({"photo_id": photo_id, "rel_path": rel_path, "error": err})
-                err_class = err.split(":", 1)[0] if ":" in err else err[:40]
-                log_event("readqc", "api_fail", photo_id=photo_id, error_class=err_class)
-                print(f"[readqc] [{i:>4}/{len(targets)}] FAIL {photo_id[:10]} {err[:80]}")
-                continue
+        usd = cost_of(model, usage)
+        row = {
+            "photo_id": photo_id,
+            "model": model,
+            "cost_usd": round(usd, 6),
+            **result.model_dump(),
+        }
+        line = json.dumps(row, ensure_ascii=False) + "\n"
 
-            usd = cost_of(model, usage)
+        with state_lock:
             total_cost += usd
-            row = {
-                "photo_id": photo_id,
-                "model": model,
-                "cost_usd": round(usd, 6),
-                **result.model_dump(),
-            }
-            out.write(json.dumps(row, ensure_ascii=False) + "\n")
-            out.flush()
-
-            if i % 25 == 0 or i == len(targets):
-                rate = i / (time.time() - t0)
-                eta_s = (len(targets) - i) / rate if rate > 0 else 0
-                print(
-                    f"[readqc] [{i:>4}/{len(targets)}] {result.relevance:9s} {result.phase:13s} "
-                    f"cost=${total_cost:.3f} rate={rate:.1f}/s eta={eta_s/60:.1f}m"
+            completed += 1
+            done = completed
+            cum_cost = total_cost
+            if total_cost > max_cost_usd and not cost_exceeded.is_set():
+                cost_exceeded.set()
+                log_event(
+                    "readqc", "cost_ceiling_hit",
+                    total_cost_usd=round(total_cost, 4),
+                    max_cost_usd=max_cost_usd,
+                    photos_done=done,
+                    photos_remaining=len(targets) - done,
                 )
+        with file_lock:
+            out_fh.write(line)
+            out_fh.flush()
 
-            if total_cost > max_cost_usd:
-                print(f"[readqc] HALT: cost ${total_cost:.2f} exceeded ceiling ${max_cost_usd:.2f}")
-                log_event("readqc", "cost_ceiling_hit",
-                          total_cost_usd=round(total_cost, 4), max_cost_usd=max_cost_usd,
-                          photos_done=i, photos_remaining=len(targets) - i)
-                break
+        if done % 25 == 0 or done == len(targets):
+            rate = done / (time.time() - t0) if (time.time() - t0) > 0 else 0
+            eta_s = (len(targets) - done) / rate if rate > 0 else 0
+            print(
+                f"[readqc] [{done:>4}/{len(targets)}] "
+                f"{result.relevance:9s} {result.phase:13s} "
+                f"cost=${cum_cost:.3f} rate={rate:.1f}/s "
+                f"eta={eta_s/60:.1f}m"
+            )
+        return row
+
+    try:
+        # Pre-warm the cache with the first photo: one sync call before
+        # the pool fans out, so subsequent workers hit cache_read pricing.
+        first_pid, first_rel = targets[0]
+        process_one(1, first_pid, first_rel)
+
+        # Remaining targets fan out across the pool. ThreadPool keeps the
+        # GIL-friendly httpx I/O concurrent without async-ifying anything.
+        rest = targets[1:]
+        if rest and not cost_exceeded.is_set() and n_workers > 1:
+            with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                futures = [
+                    ex.submit(process_one, idx, pid, rel)
+                    for idx, (pid, rel) in enumerate(rest, 2)
+                ]
+                for _fut in as_completed(futures):
+                    # Result is already written / state already updated by
+                    # the worker; we just iterate to surface any raised
+                    # exceptions (and to keep the loop alive).
+                    try:
+                        _fut.result()
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[readqc] worker raised: "
+                              f"{type(e).__name__}: {e}", file=sys.stderr)
+        elif rest:
+            # Sequential fallback (--workers 1). Preserves prior behavior.
+            for idx, (pid, rel) in enumerate(rest, 2):
+                if cost_exceeded.is_set():
+                    break
+                process_one(idx, pid, rel)
+    finally:
+        out_fh.close()
+
+    if cost_exceeded.is_set():
+        print(f"[readqc] HALT: cost ${total_cost:.2f} exceeded "
+              f"ceiling ${max_cost_usd:.2f}")
 
     if failures:
-        # Append to failures file (preserve any from previous runs)
         prior: list[dict] = []
         if READQC_FAILURES_JSON.exists():
             try:
@@ -343,23 +474,38 @@ def run_batch(model_key: str, n_limit: int | None, max_cost_usd: float) -> int:
             except json.JSONDecodeError:
                 prior = []
         READQC_FAILURES_JSON.write_text(
-            json.dumps(prior + failures, indent=2, ensure_ascii=False), encoding="utf-8"
+            json.dumps(prior + failures, indent=2, ensure_ascii=False),
+            encoding="utf-8",
         )
         print(f"[readqc] {len(failures)} failures -> {READQC_FAILURES_JSON.name}")
 
-    print(f"[readqc] done. total cost ${total_cost:.3f}, {time.time() - t0:.1f}s")
-    log_stage_end("readqc", total_cost_usd=round(total_cost, 4),
-                  n_failures=len(failures), elapsed_s=round(time.time() - t0, 1))
+    elapsed = time.time() - t0
+    print(f"[readqc] done. total cost ${total_cost:.3f}, {elapsed:.1f}s")
+    log_stage_end(
+        "readqc", total_cost_usd=round(total_cost, 4),
+        n_failures=len(failures), elapsed_s=round(elapsed, 1),
+        n_workers=n_workers,
+    )
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=None, help="limit to first N photos (smoke test)")
-    ap.add_argument("--model", choices=list(MODELS.keys()), default=DEFAULT_MODEL)
+    ap.add_argument("--n", type=int, default=None,
+                    help="limit to first N photos (smoke test)")
+    ap.add_argument("--model", choices=list(MODELS.keys()),
+                    default=DEFAULT_MODEL)
     ap.add_argument("--max-cost-usd", type=float, default=40.0)
+    ap.add_argument(
+        "--workers", type=int, default=8,
+        help=(
+            "concurrent API workers (default 8). 1 = sequential. "
+            "Each worker holds one in-flight vision call. Stay within "
+            "your tier's per-minute rate limit."
+        ),
+    )
     args = ap.parse_args()
-    return run_batch(args.model, args.n, args.max_cost_usd)
+    return run_batch(args.model, args.n, args.max_cost_usd, args.workers)
 
 
 if __name__ == "__main__":
