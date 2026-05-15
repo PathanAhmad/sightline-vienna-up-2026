@@ -63,91 +63,106 @@ def m_to_dlon(m: float) -> float:
 
 
 def build_trench_geometry() -> list[dict]:
-    """20 LineString segments forming a stylized 'T' trench network.
+    """20 LineString segments laid out like a small residential block.
 
-    Layout:
-      - 10 segments running W → E along lat=CENTER_LAT (the 'main' trunk)
-      - 5 segments running N from a junction at segment 5's east end
-      - 5 segments running S from the same junction
+    Geometry (waypoints in meters relative to CENTER; the script converts
+    to WGS84 lat/lon):
+      - Main spine (S001..S008): 8 segments meandering NW → SE
+      - NE branch (S009..S013):  5 segments curving NE off the spine's
+                                 SE end
+      - SW branch (S014..S017):  4 segments going SW off the middle of
+                                 the spine
+      - Cul-de-sac (S018..S020): 3 segments looping back at the SW end
 
-    Each segment is ~40m long. Total network ~800m. FCP F001 covers the
-    north half (main trunk + N branch), F002 covers the south branch.
+    Total ~20 segments, ~850 m of trench. FCP F001 covers the main spine
+    (the "well-documented main street" in the demo narrative); F002
+    covers everything else (the "missed side streets").
+
+    All coordinates are synthetic. No real Maria Rain geometry is encoded
+    here — see NDA note at the top of this file.
     """
-    segments: list[dict] = []
-    seg_idx = 1
-    seg_len_m = 40.0
+    import math
 
-    # Main W-E trunk: 10 segments
-    start_lon = CENTER_LON - m_to_dlon(200)  # 200m west of center
-    for i in range(10):
-        lon_a = start_lon + m_to_dlon(seg_len_m * i)
-        lon_b = start_lon + m_to_dlon(seg_len_m * (i + 1))
-        fcp = "F001" if i < 5 else "F002"  # west half F001, east half F002
-        segments.append(
-            {
-                "segment_id": f"S{seg_idx:03d}",
+    # Each waypoint: (meters_north_of_center, meters_east_of_center).
+    spine = [
+        (160, -220), (130, -170), (100, -130), (75, -85), (50, -45),
+        (15, -10), (-20, 25), (-55, 60), (-90, 95),
+    ]
+    ne_branch = [
+        spine[-1], (-65, 130), (-50, 165), (-30, 195), (-5, 215), (25, 235),
+    ]
+    sw_branch = [
+        spine[5],  # mid-spine junction (the (15, -10) waypoint)
+        (-5, -50), (-30, -85), (-65, -110), (-95, -130),
+    ]
+    cul_de_sac = [
+        sw_branch[-1], (-125, -120), (-140, -90), (-115, -75),
+    ]
+
+    def to_lonlat(mn: float, me: float) -> list[float]:
+        # GeoJSON uses [lon, lat] order.
+        return [CENTER_LON + m_to_dlon(me), CENTER_LAT + m_to_dlat(mn)]
+
+    def seg_length_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    def emit_chain(
+        chain: list[tuple[float, float]],
+        start_idx: int,
+        fcp: str,
+        duct: str,
+    ) -> list[dict]:
+        out: list[dict] = []
+        for i in range(len(chain) - 1):
+            a, b = chain[i], chain[i + 1]
+            out.append({
+                "segment_id": f"S{start_idx + i:03d}",
                 "fcp_name": fcp,
-                "duct_main_short": "R001",
-                "length_m": seg_len_m,
-                "coords": [[lon_a, CENTER_LAT], [lon_b, CENTER_LAT]],
-            }
-        )
-        seg_idx += 1
+                "duct_main_short": duct,
+                "length_m": round(seg_length_m(a, b), 1),
+                "coords": [to_lonlat(*a), to_lonlat(*b)],
+            })
+        return out
 
-    # Junction at end of main (east end), branch north then south.
-    junction_lon = start_lon + m_to_dlon(seg_len_m * 10)
-
-    # N branch: 5 segments
-    for i in range(5):
-        lat_a = CENTER_LAT + m_to_dlat(seg_len_m * i)
-        lat_b = CENTER_LAT + m_to_dlat(seg_len_m * (i + 1))
-        segments.append(
-            {
-                "segment_id": f"S{seg_idx:03d}",
-                "fcp_name": "F002",
-                "duct_main_short": "R002",
-                "length_m": seg_len_m,
-                "coords": [[junction_lon, lat_a], [junction_lon, lat_b]],
-            }
-        )
-        seg_idx += 1
-
-    # S branch: 5 segments
-    for i in range(5):
-        lat_a = CENTER_LAT - m_to_dlat(seg_len_m * i)
-        lat_b = CENTER_LAT - m_to_dlat(seg_len_m * (i + 1))
-        segments.append(
-            {
-                "segment_id": f"S{seg_idx:03d}",
-                "fcp_name": "F002",
-                "duct_main_short": "R003",
-                "length_m": seg_len_m,
-                "coords": [[junction_lon, lat_a], [junction_lon, lat_b]],
-            }
-        )
-        seg_idx += 1
-
+    segments: list[dict] = []
+    segments += emit_chain(spine, 1, "F001", "R001")          # S001..S008
+    segments += emit_chain(ne_branch, 9, "F002", "R002")      # S009..S013
+    segments += emit_chain(sw_branch, 14, "F002", "R003")     # S014..S017
+    segments += emit_chain(cul_de_sac, 18, "F002", "R004")    # S018..S020
     return segments
 
 
+def _poly_lonlat(
+    points_mn_me: list[tuple[float, float]],
+) -> list[list[float]]:
+    """Convert (north_m, east_m) points to a closed GeoJSON ring of
+    [lon, lat]."""
+    ring = [
+        [CENTER_LON + m_to_dlon(me), CENTER_LAT + m_to_dlat(mn)]
+        for mn, me in points_mn_me
+    ]
+    if ring[0] != ring[-1]:
+        ring.append(ring[0])
+    return ring
+
+
 def build_fcps_geojson(segments: list[dict]) -> dict:
-    """Two FCP squares. F001 covers the western half of the main trunk;
-    F002 covers everything else (east half + both branches)."""
-    half_lon = CENTER_LON - m_to_dlon(100)
-    f001 = [
-        [CENTER_LON - m_to_dlon(220), CENTER_LAT - m_to_dlat(30)],
-        [half_lon, CENTER_LAT - m_to_dlat(30)],
-        [half_lon, CENTER_LAT + m_to_dlat(30)],
-        [CENTER_LON - m_to_dlon(220), CENTER_LAT + m_to_dlat(30)],
-        [CENTER_LON - m_to_dlon(220), CENTER_LAT - m_to_dlat(30)],
-    ]
-    f002 = [
-        [half_lon, CENTER_LAT - m_to_dlat(220)],
-        [CENTER_LON + m_to_dlon(260), CENTER_LAT - m_to_dlat(220)],
-        [CENTER_LON + m_to_dlon(260), CENTER_LAT + m_to_dlat(220)],
-        [half_lon, CENTER_LAT + m_to_dlat(220)],
-        [half_lon, CENTER_LAT - m_to_dlat(220)],
-    ]
+    """Two stylized FCP polygons drawn loosely around the trench shapes.
+
+    F001 wraps the main spine (NW → SE meander), F002 wraps everything
+    else (the two branches + the cul-de-sac).
+    """
+    # F001 — irregular hexagon hugging the spine
+    f001 = _poly_lonlat([
+        (175, -245), (180, -110), (50, 5), (-30, 50),
+        (-110, 110), (-120, 25), (-50, -100), (130, -245),
+    ])
+    # F002 — multi-vertex polygon covering NE branch + SW branch + loop
+    f002 = _poly_lonlat([
+        (45, 260), (-15, 235), (-55, 175), (-110, 110),
+        (-160, 0), (-155, -150), (-100, -160), (-35, -115),
+        (10, -50), (35, 5), (15, 110), (35, 195),
+    ])
     return {
         "type": "FeatureCollection",
         "features": [
@@ -166,14 +181,10 @@ def build_fcps_geojson(segments: list[dict]) -> dict:
 
 
 def build_cluster_geojson() -> dict:
-    """One bounding polygon ~600x500m centered on CENTER."""
-    coords = [
-        [CENTER_LON - m_to_dlon(230), CENTER_LAT - m_to_dlat(230)],
-        [CENTER_LON + m_to_dlon(270), CENTER_LAT - m_to_dlat(230)],
-        [CENTER_LON + m_to_dlon(270), CENTER_LAT + m_to_dlat(230)],
-        [CENTER_LON - m_to_dlon(230), CENTER_LAT + m_to_dlat(230)],
-        [CENTER_LON - m_to_dlon(230), CENTER_LAT - m_to_dlat(230)],
-    ]
+    """A loose polygon enclosing everything (spine + branches + loop)."""
+    coords = _poly_lonlat([
+        (200, -260), (60, 270), (-180, 260), (-200, -180), (-110, -240),
+    ])
     return {
         "type": "FeatureCollection",
         "features": [
