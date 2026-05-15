@@ -6,82 +6,115 @@
 
 ## The one-liner
 
-> Ingest trench photos + a GeoJSON route. Phase-classify each photo, then score each **FCP + duct (R-code)** unit **green / yellow / red** against six compliance checks aggregated over its photos. Produce a reviewer-ready deficiency report.
+> Ingest trench photos + a GeoJSON route. Position each photo along the trench network using overlay-OCR'd lat/lon and address. Score each **LineString trench segment** **green / yellow / red** by the **photo-every-5m density rule** + per-photo compliance checks. Produce a reviewer-ready deficiency report.
 
-## The six checks (from the APG brief)
+## The rubric
 
-Per-photo signals; aggregated per duct (an R-code under an FCP) for the green/yellow/red verdict. A check is "satisfied for the duct" if ≥1 photo of the relevant phase confirms it.
+Two layers — both need to be green for a segment to be GREEN:
 
-| # | Check | How we detect it | Relevant phases |
+**Layer A — per-segment spatial coverage** (the rule the reference ÖGIG deck reveals):
+- **GREEN** — at least one compliant photo per 5 m of trench length, no gaps > 5 m.
+- **YELLOW** — photos exist but density < 1/5m, OR photos exist but a quality check fails.
+- **RED** — fewer than 1 photo per 10 m, OR no photos at all.
+
+**Layer B — per-photo compliance checks** (superset of the APG brief + ÖGIG-deck additions):
+
+| # | Check | Source | How we detect |
 |---|---|---|---|
-| 1 | **Warning tape (Warnband) visible** | Claude vision — yes / no / occluded | tape-laid, backfilled |
-| 2 | **Sand bedding documented** before backfilling | Claude vision — yes / no / occluded | sand-bedded, duct-laid |
-| 3 | **Side view / trench profile** present | Claude vision — yes / no | excavation, depth-measure, duct-laid |
-| 4 | **Trench depth** confirmed with visible reference (ruler / measuring rod) | Claude vision — depth reference visible yes/no; OCR the value if a ruler is in frame | depth-measure |
-| 5 | **Duplicate / reused photo** across lots | `imagehash.phash` Hamming-distance ≤ 6 across the corpus | all |
-| 6 | **GPS location consistent** with declared project site | Overlay address / lat/lon + paper-label FCP code; cross-check against FCP polygon and SiteCluster | all |
+| 1 | **Warning tape (Warnband) visible** | APG brief | Claude vision — yes / no / occluded |
+| 2 | **Sand bedding visible** before backfilling | APG brief + ÖGIG deck | Claude vision — yes / no / occluded |
+| 3 | **Side view / trench profile** present | APG brief | Claude vision — yes / no |
+| 4 | **Trench depth confirmed** with visible reference (ruler / measuring rod) | APG brief + ÖGIG deck ("ruler readable") | Claude vision — depth reference visible yes/no; OCR the value if a ruler is in frame |
+| 5 | **Duplicate / reused photo** across the corpus | APG brief (our differentiator) | `imagehash.phash` Hamming-distance ≤ 6 |
+| 6 | **GPS / location consistent** with declared project site | APG brief + ÖGIG deck ("GPS stamp") | Overlay address / lat/lon + paper-label FCP code; cross-check against FCP polygon and SiteCluster |
+| 7 | **Pipe ends sealed** (white end-caps on duct bundle) | ÖGIG deck only — **not in the APG brief** but industry-standard | Claude vision — yes / no / occluded |
+| 8 | **No personal data** (faces / license plates) visible | ÖGIG deck only — NIS2 compliance | Claude vision — yes / no |
 
-Privacy (no faces / plates / addresses leaking) is mentioned in the brief — keep it as a flag-only signal, no pixel-level redaction.
+**How Layer B feeds Layer A.** A photo counts as **compliant** for the 5m density rule if ALL of these hold:
+- `relevance = scorable` (the relevance gate passed)
+- `personal_data_visible = no` (NIS2 clean)
+- It is NOT a duplicate of another photo we've already counted (check 5)
+- Its overlay address / lat/lon snapped to a segment without a >150m disagreement (check 6 passed)
+- The phase-relevant subset of `{warning_tape, sand_bedding, side_view, depth_reference, duct, pipe_ends_sealed}` is all `yes` (treating `occluded` as a partial credit, not pass)
+
+A `scorable` photo that fails any of the above is counted as "photo present but quality insufficient" (the YELLOW driver). A photo that fails the relevance gate is dropped from the segment entirely (logged in a separate bucket).
+
+## What we cannot assess
+
+The reference deck also requires **RTK GPS survey verification** (centimeter-grade survey data). We do not have RTK data for this dataset — only photo-overlay GPS at ±3.79m accuracy. We frame this explicitly in the pitch: "We assess the photo half of compliance. RTK survey verification is a complementary future phase."
 
 ## What data we have (in `Resources/`)
 
-- **3,929 trench photos** (`Fotos-...zip`) — Maria Rain, Carinthia. Mixed WhatsApp uploads + a TimePhoto-style overlay app. **No EXIF GPS.** Each photo has a printed overlay with date + street address; a minority also has lat/lon printed.
-- **223 labeled example photos** (`Beispiele-...zip`):
-  - `Beispiele/depth/` — 114 examples of visible depth measurement
-  - `Beispiele/duct/` — 105 examples of visible duct / cable
-  - 4 root exemplars: `bad.jpeg`, `duct_sand.jpg`, `duct_depth.jpg`, `warnband.jpeg`. **Use as few-shot anchors in the Claude prompt.**
-- **Geo data** (`CLP20417A-P1-B00__...zip`) — one cluster: 1 POP, 9 FCPs, 2,983 trench LineString segments, FCP polygons, SiteCluster polygon. CRS **WGS84 / EPSG:4326** — no reprojection.
-- **Reference decks** (`oegig_ai_qc_*.pptx`) — example pitch shape, ÖGIG-themed (not ours). Steal the structure, not the numbers.
-- **The brief** (`Hackathon Challenge_ ... .docx`) — source of truth.
+- **3,929 trench photos** (`Fotos-...zip`) — Maria Rain, Carinthia. Mixed WhatsApp uploads + a TimePhoto-style overlay app (also occasionally GPS Map Camera). **No EXIF GPS.** Each photo has a printed overlay with date + street address; ~70% also have lat/lon printed.
+  - **Hidden duplicate ground truth in filenames.** 1027 files carry an `N_` prefix (`1_IMG-...`, `2_IMG-...`). Same image stem appearing under multiple N_ prefixes = same photo submitted to multiple jobs. **471 unique stems → 556 known duplicates pre-labeled by the submission system.** Plus 43 files with the Russian `— копия` ("copy") suffix. Together ~600 known duplicates for free — perfect ground truth for our pHash dedup recall check.
+- **219 labeled example photos** (`Beispiele-...zip`) — these are a **labeled subset of Fotos**, not separate data:
+  - `Beispiele/depth/` — 114 photos labeled "depth-primary" (measuring rod is the dominant feature)
+  - `Beispiele/duct/` — 105 photos labeled "duct-primary" (cable bundle is the dominant feature)
+  - 0 overlap between depth/ and duct/ — labels are mutually exclusive
+  - 4 root exemplars: `bad.jpeg`, `duct_sand.jpg`, `duct_depth.jpg`, `warnband.jpeg`. Used as few-shot anchors in the Claude prompt.
+  - **Use these as a calibration set:** after the batch run, measure our classifier's accuracy at predicting phase=`depth_measure` for `Beispiele/depth/` photos and phase=`duct_laid` for `Beispiele/duct/` photos. Becomes a pitch-able accuracy number.
+- **Geo data** (`CLP20417A-P1-B00__...zip`) — one cluster: POP file empty, 9 FCPs, 2,983 trench LineString segments, FCP polygons, SiteCluster polygon. CRS **WGS84 / EPSG:4326** — no reprojection.
+  - **Coverage gotcha:** FCP polygons cover 102.8% of the SiteCluster but with 18.7% gap inside the cluster and 21.5% spill outside. Point-in-polygon alone isn't sufficient for FCP assignment — need a nearest-FCP fallback when an address falls into a gap.
+- **Reference decks** (`oegig_ai_qc_*.pptx`) — ÖGIG-themed, **but contain the actual scoring rubric** (per-segment, photo-every-5m, 6 photo-compliance criteria). Pitch arc borrowed; rubric adopted; cost numbers used pending Martin's APG-specific replacements.
+- **The brief** (`Hackathon Challenge_ ... .docx`) — source of truth. 6 APG checks: warning tape, sand bedding, side view, depth, duplicate, GPS-consistent.
 
 ## Stack (locked, see [pyproject.toml](pyproject.toml))
 
-Python 3.11 + uv · Streamlit (no FastAPI — one process) · Claude Haiku 4.5 vision as QC engine · `imagehash` (pHash) + Pillow ELA for forensics · `geopandas` + `folium` for geo · `pillow-heif` defensive for HEIC (current data is JPEG, keep it). No YOLO. No torch. No `easyocr`/`paddleocr`.
+Python 3.11 + uv · Streamlit (no FastAPI — one process) · **Claude Sonnet 4.6** vision as QC engine (upgraded from Haiku 4.5 after a 5-photo head-to-head: Sonnet wins 3/5 on hard cases — night shots, multi-phase priority, edge-of-frame tape — for ~$15 batch cost vs Haiku's ~$5; the $10 delta buys correctness on the hardest demo cases) · `imagehash` (pHash) + Pillow ELA for forensics · `geopandas` + `folium` for geo · `pillow-heif` defensive for HEIC (current data is JPEG, keep it). No YOLO. No torch. No `easyocr`/`paddleocr`.
 
 ## Pipeline (named stages, each in its own file)
 
 ```
 01 ingest       → walk photos, load GeoJSONs into geopandas
 02 forensics    → pHash dedup across the corpus (cheap, no API) + ELA pass for tamper hints
-03 readqc       → ONE Claude vision call per unique photo: phase + relevance + overlay fields + 5 visual checks
-04 geomatch     → (a) lat/lon ↔ printed-address sanity check, then (b) join overlay address / paper FCP+R code → FCP polygon and duct (R-code)
-05 classify     → roll up per FCP+duct: complete / partial / missing per phase-relevant check
-06 report       → Streamlit UI: folium map + clickable duct panel + downloadable deficiency CSV; surface the "obvious-error" flags (duplicates + geo-mismatch) at the top
+03 readqc       → ONE Claude Sonnet 4.6 vision call per unique photo: phase + relevance + overlay fields + 7 visual checks (incl. pipe_ends_sealed, personal_data_visible)
+04 geomatch     → snap each photo to a precise point on the trench network:
+                  (a) Overlay lat/lon → nearest LineString segment + position along that segment
+                  (b) Address-only photos → forward-geocode via Nominatim → nearest LineString within the FCP polygon
+                  (c) Cross-check: if lat/lon and geocoded-address disagree by >150m AND different street → flag
+                  (d) Paper-label FCP + R code (when present) → consistency check against the snapped segment
+05 classify     → per-segment rollup:
+                  - sort photos by position along the segment
+                  - check the 5m density rule
+                  - check each photo's compliance status (passes phase-relevant subset of checks 1-7, fails check 8)
+                  - verdict: GREEN / YELLOW / RED
+06 report       → Streamlit UI: folium map (LineStrings colored by verdict) + clickable segment panel + downloadable deficiency CSV; surface the "obvious-error" flags (duplicates + geo-mismatch + personal-data-present) at the top
 ```
 
 **Pre-filter ordering rationale:**
-- **Dedup runs *before* the Claude call** so we don't pay to score the same image twice. One representative per pHash cluster goes through `readqc`; duplicates inherit its result with a `duplicate_of=…` tag.
-- **Relevance gate inside `readqc`:** Claude returns `relevance ∈ {scorable, portrait, off_topic, unreadable}`. `portrait` / `off_topic` / `unreadable` photos are **hard-dropped from scoring** (logged separately in the report as "not classified" with reason) — they don't drag a duct's score down. `scorable` photos go to phase-aware check rollup.
-- **Phase-aware scoring (soft gate):** Each `scorable` photo also returns a `phase`. The per-photo check verdicts only count toward the *checks listed as relevant for that phase* in the six-checks table. A depth-measure photo missing warning tape doesn't penalize the duct — tape is a later phase. A duct is **green** when ≥1 photo confirms each of the 6 checks across all its photos; **yellow** when 1–2 checks lack supporting photos; **red** when ≥3 do.
+- **Dedup runs *before* the Claude call** so we don't pay to score the same image twice. One representative per pHash cluster goes through `readqc`; duplicates inherit its result with a `duplicate_of=…` tag. Bonus: the 1027 `N_`-prefixed filenames give us ground-truth duplicate pairs to validate pHash recall.
+- **Relevance gate inside `readqc`:** Claude returns `relevance ∈ {scorable, portrait, off_topic, unreadable}`. `portrait` / `off_topic` / `unreadable` photos are **hard-dropped from scoring** (logged separately in the report as "not classified" with reason) — they don't drag a segment's score down. `scorable` photos go to the density rollup.
+- **Personal-data gate inside `readqc`:** Claude returns `personal_data_visible: yes/no`. Photos with `yes` are excluded from the segment's compliance count and listed in a "needs retake" bucket — addresses NIS2 without claiming pixel-level pre-filtering.
 - **Lat/lon ↔ address sanity check:** post-process `readqc` — forward-geocode the printed address (Nominatim, cached) and haversine-compare to printed coords. Threshold **>150 m AND different street** → flag. Within-street disagreement (overlay says "7 Bahnhofstraße", paper label says "Bahnhofstraße 9") is *normal* and not a fraud signal — paper documents the property being connected, overlay documents where the photographer is standing.
 
-Folder skeleton to create Friday night:
+Folder skeleton to create first thing Saturday morning:
 
 ```
 src/
-  ingest.py
-  readoverlay.py
-  qc.py
-  forensics.py
-  geomatch.py
-  classify.py
-  report.py
-app.py
-data/
-  Fotos/        # unpacked from Resources/
-  Beispiele/
-  geo/
+  ingest.py        # walk Fotos/, load GeoJSONs into geopandas, write manifest.sqlite
+  forensics.py     # imagehash pHash dedup + Pillow ELA tamper pass
+  readqc.py        # one Claude Sonnet 4.6 vision call per unique photo → QCResult Pydantic
+  geomatch.py      # snap each photo to a LineString segment (lat/lon → nearest; address → Nominatim → nearest within FCP)
+  classify.py      # per-segment 5m density rollup → GREEN/YELLOW/RED
+  report.py        # Streamlit + folium UI; deficiency CSV; "not classified" / "personal-data" buckets
+app.py             # `streamlit run app.py` entrypoint
+scripts/           # one-off spikes (already committed: spike_qc_schema.py, spike_nominatim.py, spike_sonnet_vs_haiku.py)
+data/              # gitignored — Fotos/, Beispiele/, geo/
 ```
 
-Each stage prints what it did in plain English. Example: `[qc] 3920/3929 scored, 9 read failures → qc_failures.json`.
+Each stage prints what it did in plain English. Example: `[readqc] 3,372 photos scored, 9 parse failures → readqc_failures.json` and `[geomatch] 2,948 snapped to segment, 384 FCP-only (gap), 17 off-cluster → geomatch.csv`.
 
-## The geomatch redesign (biggest single change from the old plan)
+## The geomatch redesign (corrected after PPT review)
 
-**Old plan assumed EXIF GPS, and PLAN.md v1 also assumed per-segment scoring.** Both wrong:
-- 0/50 random photos sampled have any EXIF (WhatsApp strips it). Signal = overlay text + paper label.
-- The paper labels carry `F### + R### + slot + color` — they encode **FCP + duct main + bundle-position**, NOT LineString segment ID. Of 2,983 segments, the median R-code spans 4 segments — so a paper label can't pick one. Per-segment scoring is unsupported by the data we have.
+**Two earlier pivots and one correction:**
 
-**Granularity decision (2026-05-15 evening):** scoring unit is the **FCP+duct (R-code) pair** — ~200 cells across the 9 FCPs. Map shows colored ducts, click drills into the photo set per duct. Pitch line: "9 zones, 200 ducts, 3,929 photos, 12 deficient ducts."
+1. **Old plan (PLAN.md v1) assumed EXIF GPS for segment positioning.** Wrong — 0/50 random photos sampled have any EXIF. WhatsApp strips it. The geolocation signal is **overlay-OCR'd lat/lon + address + paper-label FCP code**, not EXIF.
+
+2. **First pivot moved to per-FCP+duct (R-code) granularity** because paper labels don't encode segment IDs. **That pivot was wrong** — it ignored the reference ÖGIG deck's rubric, which is explicitly per-segment with a 5m photo-density rule.
+
+3. **Correction (now):** scoring unit is **per LineString segment** (2,983 cells across the 9 FCPs). Segment positioning is achieved via **overlay lat/lon → nearest-LineString snap**, not via paper labels. Paper labels are a *consistency check* (FCP + R code should match the snapped segment), not the primary geomatch signal.
+
+**Pitch line:** "2,983 trench segments across 9 zones. We can tell you, segment by segment, which ones have compliant photo coverage every 5 meters and which ones have gaps."
 
 **Why a vision model, not OCR + regex (research + 21-photo eyes-on sample):**
 - **Overlay position varies.** Bottom-right (TimePhoto family, most common), top-right (TimeStamp Camera with English locale), top-left (GPS Map Camera, with its own watermark). No fixed crop covers all cases.
@@ -89,18 +122,21 @@ Each stage prints what it did in plain English. Example: `[qc] 3920/3929 scored,
 - **Language mixes German, English, Russian (Cyrillic), and partial transliterations** on the *same* fields — country renders as `Austria` / `Австрия` / `Kärnten`; city as `Maria Rain` / `Мария-Райн`; months as `авг.` / `ноя6.` / `Oct`.
 - **~30% of sampled photos show no visible lat/lon at all** — just date + address.
 - **Overlay can be partially occluded** by paper labels held against the camera.
-- A regex pipeline would silently fail on a meaningful fraction; Claude vision handles every variation in one shot, returns structured JSON, also reads the paper FCP label, classifies phase, and assigns relevance — one call.
+- A regex pipeline would silently fail on a meaningful fraction; Claude Sonnet 4.6 vision handles every variation in one shot, returns structured JSON, classifies phase, reads the paper FCP label, and assigns relevance — one call.
 
 **What we do:**
-1. **One Claude vision call per unique photo** (post-dedup) returns the overlay fields, the QC signals, the phase, and the relevance gate — see schema below.
-2. **Sanity flag — lat/lon vs printed address.** If both are present, forward-geocode the address (Nominatim, cached) and haversine to the printed coords. Flag only when distance >150 m **and** different street/locality. Within-street differences are expected (paper = destination property, overlay = photographer's location).
-3. **Paper-label codes** look like `F170-R084-11-or`. `F170` → `fcpName` in `FCPs.geojson`. `R084` → `ductMainShort` in `Trenches.geojson` (200 unique R-codes). The `-11-` is the slot in the cable bundle and `-or` is the duct colour — those identify the *specific cable*, not the LineString segment.
-4. **Match logic, in order of preference:**
-   - **Paper label visible** → direct join to (FCP, R-code).
-   - **Lat/lon printed** → point-in-polygon against the 9 FCP polygons; if inside one, FCP assigned. R-code resolved by snapping to nearest LineString of that FCP and reading its `ductMainShort`.
-   - **Address only** → match street/house number to the closest FCP polygon. If ambiguous, leave R-code blank; the photo still counts toward FCP-level coverage.
-   - **None of the above (off-cluster, e.g. `Lambichl` overlay)** → flagged as `geo_mismatch`.
-5. **Check 6 (location consistency):** photo's resolved FCP/R must lie inside the SiteCluster polygon (Maria Rain, CLP20417A). FCP code on paper must match the polygon's `fcpName`. Mismatches → flagged, not silently dropped.
+1. **One Claude Sonnet 4.6 vision call per unique photo** (post-dedup) returns the overlay fields, the 7 per-photo visual checks (warning tape, sand bedding, side view, depth reference, duct visible, pipe ends sealed, personal data visible), the phase, and the relevance gate — see schema below. The other 2 rubric items (duplicate detection, GPS-consistency) are handled outside this call: duplicate detection in `forensics.py` via pHash; GPS-consistency in `geomatch.py` via lat/lon ↔ geocoded address haversine check.
+2. **Geo-snap order of preference:**
+   - Lat/lon printed → snap to nearest LineString in `Trenches.geojson` (and record position along it).
+   - Address only → Nominatim forward-geocode → snap to nearest LineString within the matching FCP polygon.
+   - Neither → photo enters the "unmappable" bucket; counts toward FCP-level totals but not segment-level.
+3. **Cross-checks (after snap):**
+   - If lat/lon AND address both present, geocode the address and check the haversine distance to the printed coords. Threshold **>150 m AND different street** → flag. (Same-street disagreement is normal: paper label = property being connected, overlay = photographer's location.)
+   - If paper label `F###-R###` present, check the FCP and duct of the snapped segment match. Mismatch → flag.
+4. **Off-cluster handling.** Confirmed working: Lambichl (a neighboring village) addresses geocode to a point ~1.7 km outside the SiteCluster polygon — correctly flagged as off-cluster, not silently dropped.
+5. **Density rollup per segment.** Sort the snapped points by position along the segment. The segment is GREEN if no >5 m gap exists between consecutive compliant photos AND the start and end of the segment are each within 5 m of a compliant photo. YELLOW if photos exist but gaps > 5 m or quality fails. RED if no compliant photos at all.
+
+**Paper-label codes** look like `F170-R084-11-or`: `F170` → `fcpName` in `FCPs.geojson`, `R084` → `ductMainShort` in `Trenches.geojson` (200 unique R-codes), `-11-` is the slot in the cable bundle and `-or` is the duct colour. The slot+colour identify the *specific cable*, not the LineString segment — so paper labels are a consistency check on the snapped segment's FCP/R, not the primary geomatch signal.
 
 ## Claude prompt sketch (one call per photo)
 
@@ -111,52 +147,62 @@ QC_SCHEMA = {
     "properties": {
         # Relevance gate (hard drop if not 'scorable')
         "relevance":               {"enum": ["scorable", "portrait", "off_topic", "unreadable"]},
-        # Phase of work — only the checks relevant to this phase count toward the duct's rollup
+        # Phase of work — informational; the 5m density rollup uses positions, not phases
         "phase":                   {"enum": ["excavation", "depth_measure", "duct_laid",
                                               "sand_bedded", "tape_laid", "backfilled",
                                               "restored", "paper_label", "staging", "other"]},
-        # The 5 visual checks
+        # 7 visual checks (APG brief 5 + ÖGIG deck additions)
         "warning_tape_visible":    {"enum": ["yes", "no", "occluded"]},
         "sand_bedding_visible":    {"enum": ["yes", "no", "occluded"]},
         "side_view_present":       {"enum": ["yes", "no"]},
         "depth_reference_visible": {"enum": ["yes", "no"]},
         "depth_value_cm":          {"type": ["number", "null"]},
         "duct_visible":            {"enum": ["yes", "no", "occluded"]},
+        "pipe_ends_sealed":        {"enum": ["yes", "no", "occluded", "not_applicable"]},  # ÖGIG-deck addition
+        # NIS2 / privacy gate
+        "personal_data_visible":   {"enum": ["yes", "no"]},  # faces or license plates
         # Overlay + paper label (the geomatch signals)
         "overlay_date":            {"type": "string"},
         "overlay_address":         {"type": "string"},
         "overlay_latlon":          {"type": ["string", "null"]},
         "paper_label_code":        {"type": ["string", "null"]},
         # Free-text reason — especially useful when relevance != scorable
-        "note":                    {"type": "string", "maxLength": 200},
+        "note":                    {"type": "string", "maxLength": 500},
     },
     "required": ["relevance", "phase",
                  "warning_tape_visible", "sand_bedding_visible", "side_view_present",
                  "depth_reference_visible", "duct_visible",
+                 "pipe_ends_sealed", "personal_data_visible",
                  "overlay_date", "overlay_address", "note"],
 }
 ```
 
-System prompt loads the 4 root exemplars (`bad`, `duct_sand`, `duct_depth`, `warnband`) once with a cache breakpoint.
+System prompt loads the 4 root exemplars (`bad`, `duct_sand`, `duct_depth`, `warnband`) once with a cache breakpoint. **Note:** `scripts/spike_qc_schema.py` validates the v2 5-check schema (no `pipe_ends_sealed`, no `personal_data_visible`); the production `src/readqc.py` extends to the 7-check schema above. The Pydantic class in the spike script is the reference template — copy-and-extend.
 
 ## 48-hour timeline (loose, spine firm)
 
-### Friday tonight (now → 23:00)
-- Unpack `Resources/Fotos.zip` and `Resources/Beispiele.zip` and `Resources/CLP....zip` into `data/`.
-- Get the spine running: ingest photos + GeoJSONs, save a manifest to SQLite.
-- One Claude vision call working end-to-end on a single photo, returning the full JSON schema.
-- Folium map showing the SiteCluster polygon + the 2,983 trench segments.
-- **End-state by midnight:** `streamlit run app.py` shows "loaded 3,929 photos, here's the map."
+### Friday tonight — DONE (research, no code yet)
+
+Friday evening was spent on a deep data audit + AI spike + the PPT-rubric discovery + a re-spike. Output: this plan, locked. Spine work moved to Saturday early morning.
+
+Concrete deliverables committed Friday night: PLAN.md, DECISIONS.md, `scripts/spike_qc_schema.py`, `scripts/spike_nominatim.py`, `scripts/spike_sonnet_vs_haiku.py`.
+
+### Saturday early-AM (08:00 → 09:00) — pre-batch sanity
+- Folder skeleton + `src/ingest.py` (walk Fotos/, load GeoJSONs into geopandas).
+- One Claude Sonnet 4.6 vision call working end-to-end on a single photo, full JSON parses via Pydantic.
+- Folium map showing SiteCluster polygon + 2,983 trench segments.
+- Streamlit page: "loaded 3,929 photos, here's the map."
 
 ### Saturday morning (09:00 → 14:00)
-- Batch-run Claude QC on all unique photos (post-dedup). Cost: ~3,900 × ~$0.0012 (Batch API) ≈ **$5**.
-- pHash duplicate detection across the corpus.
-- ELA tamper pass on a sample.
-- Geomatch: join paper FCP+R / overlay address to FCP polygons + duct R-codes. Log unmatched.
-- **Goal by 14:00:** ducts coloring green/yellow/red on the map; "not classified" bucket lists hard-dropped photos with reason.
+- **pHash dedup FIRST** — process the whole corpus locally (no API cost). Validate recall against the ~600 known duplicates from N_ prefixes + копия suffix.
+- **Batch readqc**: send each unique photo (post-dedup) to Claude Sonnet 4.6. Cost: ~3,400 calls × ~$0.0045 ≈ **$15**. ELA tamper pass runs in parallel.
+- **Geomatch**: snap each photo to a LineString via overlay lat/lon (primary) or geocoded address + nearest-LineString within nearest FCP polygon (fallback). Log unmatched.
+- **Classify**: per-segment 5m density rollup → GREEN/YELLOW/RED verdict. Account for the 18.7% FCP-polygon gaps (nearest-FCP fallback).
+- **Calibration check**: measure phase-classifier agreement against Beispiele/depth (114 photos labeled depth-primary) and Beispiele/duct (105 photos labeled duct-primary). Becomes a pitchable accuracy number.
+- **Goal by 14:00:** segments coloring green/yellow/red on the map; "not classified" + "personal-data" + "geo-mismatch" buckets populated.
 
 ### Saturday afternoon (14:00 → 17:00)
-- Click a red duct → side panel with photo grid + per-photo phase + signal table + Claude's note.
+- Click a red segment → side panel with photo grid + per-photo phase + signal table + Claude's note + gap analysis ("no compliant photo between meter 12 and meter 31").
 - Deficiency report: CSV + a one-page HTML summary.
 - **17:00 tech checkpoint with Sustainista.** Show what works.
 
@@ -173,32 +219,34 @@ System prompt loads the 4 root exemplars (`bad`, `duct_sand`, `duct_depth`, `war
 
 1. **Live tamper:** mid-pitch, doctor a photo on stage → run it → tool flags it.
 2. **The "wrong segment" catch:** show two near-identical photos submitted to different segments → tool calls duplicate-use.
-3. **Click the red duct:** map mostly green with one screaming red duct line → click → photo grid + reason list per phase ("no depth-measure photo on file for this duct").
+3. **Click the red segment:** map mostly green with one screaming red trench segment → click → photo grid + a gap-analysis line ("no compliant photo between meter 12 and meter 31 of this 47-meter segment").
 4. **Cost on screen:** "this segment protects €X of grid asset" — translates ML to euros.
 
-## Pitch outline (5 slides, 3 minutes)
+## Pitch outline (5 slides, 3 minutes) — hybrid: ÖGIG deck arc, pruned, recontextualized to APG
 
-1. **The pain in one number.** APG has 424,000 trench photos in scope. Engineers review them by hand. Manipulation and re-use go undetected.
-2. **What we built.** Screenshot of the map. Name the buyer: APG.
-3. **How it works.** 5-step arrow diagram (ingest → OCR overlay → QC → classify → report).
-4. **Who pays + what we save.** Engineer-hours per project × portfolio size = SaaS pricing.
-5. **What's next.** Contractor accountability, real-time upload from job phones, NIS2 audit trail.
+Slides are rails — demo eats ≥60% of the 3 minutes. Each slide is 1 sentence + 1 visual, no walls of text.
 
-## Open questions for Martin Fuhrmann (he's around till ~20:00 today)
+1. **Hook — "A hidden risk in every meter."** APG has 424,000 trench photos. Engineers review them by hand. Manipulation, re-use, and missing-documentation go undetected today. Each undocumented fiber cut during future road works costs €120K+; a 3–5× multiplier when liability cannot be proven. (Numbers borrowed from the ÖGIG reference deck — APG-specific numbers if Martin confirms tomorrow.)
+2. **Good vs bad — visual proof.** Side-by-side: one compliant photo (open trench, GPS stamp, duct bundle visible, sand bedding, ruler readable, no persons) vs one non-compliant photo (dark, occluded, no duct visible). Establishes our checklist in the audience's head with zero technical jargon.
+3. **THE DEMO.** Streamlit map, 9 colored FCP zones, 2,983 colored trench segments. Click a RED segment → photo grid + the specific reasons it's red ("no compliant photo between meter 12 and meter 31"; "photo X reused from job Y"; "photo Z contains a worker's face — NIS2 violation"). This is where we spend ~60% of the time.
+4. **How it works in one diagram.** 5 stages: Ingest → AI Review → Geo-Match → Classify → Report. Manual review: 3–5 days per section. Our run: <30 minutes for the entire 3,929-photo dataset, cost ~$15.
+5. **CTA — "Approve, define KPIs, scale."** Pilot on Maria Rain works (today). Same pipeline scales to APG's 424,000-photo portfolio. NIS2 audit trail and contractor accountability are free side-effects of the build.
 
-1. **Is APG actually the partner, or APG + ÖGIG joint?** Brief says APG; data is fiber. Need clarity.
-2. **Per-photo manifest** — CSV/sheet linking each filename to its declared lot / project / GPS? Brief implies declared-location exists somewhere.
-3. **APG trench-depth spec number** — for the prompt and for the pitch.
-4. **Pilot scope vs deployable scope** — 3,929 is the pilot; is the deployable target really 424,000?
-5. **NDA timing** — does it constrain what we can show on stage Sunday?
-6. **Cross-photo duplicates** — is duplicate-fraud actually a real APG operational pain, or is missing-evidence the bigger one?
+## Open questions for Martin Fuhrmann (only when we see him in person)
+
+Most prior questions have been answered by inspection. Remaining items are pitch/positioning, not blockers:
+
+1. **Is APG the partner alone, or APG + ÖGIG joint?** Brief says APG; data is ÖGIG-style fiber work. Affects which logo and language we lead with.
+2. **For the demo: is duplicate-photo-reuse-across-jobs a real APG operational pain, or is missing-evidence the bigger pain?** Decides which demo move we open with — fraud reveal or coverage-gap reveal.
+
+The technical plan does not depend on these answers.
 
 ## Risks / what not to do
 
-- **Don't rebuild the EXIF-GPS path.** It's empty for 715/720 photos; OCR the overlay instead.
-- **Don't try a fixed-crop + regex overlay parser.** Overlay position, lat/lon format, and language all vary across the corpus — see the geomatch redesign section. Claude vision is the extractor.
-- **Don't hard-code "30–40 cm" depth.** That was a fiber spec. Wait for Martin's APG number.
-- **Don't burn time on pixel-level privacy redaction.** Flag-only is enough for the prototype.
-- **Don't commit `Resources/` or `.audit_samples/`.** NDA on route data.
+- **Don't rebuild the EXIF-GPS path.** 0/50 random photos sampled have any EXIF (WhatsApp strips it). OCR the overlay instead.
+- **Don't try a fixed-crop + regex overlay parser.** Overlay position, lat/lon format, and language all vary across the corpus. Claude Sonnet 4.6 vision is the extractor.
+- **Don't hard-code a trench-depth number.** The brief and the ÖGIG deck both treat "is a depth reference visible" as the check, not a numeric threshold. Keep it that way.
+- **Don't burn time on pixel-level privacy redaction.** Claude flags `personal_data_visible`; the report excludes those photos and routes them to a "needs retake" bucket. NIS2-aware, not over-engineered.
+- **Don't commit `Resources/`, `data/`, or `scripts/out/`.** NDA on route data + actual addresses appear in the spike output.
 - **Don't depend on live Claude calls during the live pitch.** Pre-run Saturday night; cache the JSON; demo reads from disk (except any judge-handed photo).
-- **Don't pivot silently.** Anyone changing approach says it out loud.
+- **Don't pivot silently.** Anyone changing approach says it out loud — this doc is the source of truth.
