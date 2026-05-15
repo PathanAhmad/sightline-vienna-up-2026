@@ -20,6 +20,7 @@ Open list. Add as we learn. Only things we **cannot** get wrong.
 
 ## Process
 - **Git from minute zero. Push small and often.** Don't hoard commits waiting for "perfect." Merge conflicts are cheaper than lost work.
+- **Agent-review every commit before pushing.** After `git commit`, run an agent review on the diff (`/review`, or spawn a subagent with the commit's diff as context). Fix issues in a follow-up commit (no amend). Push only once the review comes back clean. No exceptions — even small commits.
 - **No silent pivots.** Changing approach? Say it in chat.
 - **DECISIONS.md, one line per decision, timestamped.** No re-litigating. Reasoning lives in commit messages or chat — no separate research log under sprint pressure.
 - **Anyone can call "this is taking too long."** Cut scope, don't argue.
