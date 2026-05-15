@@ -10,7 +10,11 @@ linkedin-profile-snapshot.md
 
 # Partner-provided data (NDA on route info per the brief)
 Resources/
+data/
 .audit_samples/
+
+# Local MCP config — contains API keys, never commit
+.mcp.json
 
 # Python / uv
 .venv/
