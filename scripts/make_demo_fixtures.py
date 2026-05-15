@@ -34,6 +34,7 @@ NDA hygiene:
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sqlite3
 import time
@@ -304,188 +305,18 @@ def build_photo_records(segments: list[dict]) -> tuple[list[dict], list[dict], l
             "note": note,
         }
 
-    # ------------------------------------------------------------------
-    # Segment story (mapped to indices in `segments`):
-    #
-    #   S001 GREEN  3 compliant photos covering 40m (~0,15,35m offsets)
-    #   S002 GREEN  3 compliant photos
-    #   S003 GREEN  3 compliant photos
-    #   S004 GREEN  3 compliant photos
-    #   S005 GREEN  3 compliant photos
-    #   S006 GREEN  3 compliant photos
-    #   S007 YELLOW 2 photos but max-gap 22m (>5m)
-    #   S008 YELLOW 1 photo personal_data_visible=yes (excluded)
-    #   S009 GREEN  3 compliant photos
-    #   S010 GREEN  3 compliant photos
-    #   S011 RED    no photos at all
-    #   S012 RED    no photos at all
-    #   S013 YELLOW duplicate-reuse: 2 photos, one is duplicate
-    #   S014 GREEN  3 compliant
-    #   S015 RED    1 photo, latlon-vs-address flag → not counted
-    #   S016 GREEN  3 compliant
-    #   S017 GREEN  3 compliant
-    #   S018 YELLOW phase tape_laid, no warning_tape_visible
-    #   S019 GREEN  3 compliant
-    #   S020 GREEN  3 compliant
-    # ------------------------------------------------------------------
-
-    # We have 22 photo filenames; we generate roughly 32 photo records by reusing
-    # some filenames across segments. That's realistic — different segments get
-    # different photos, but the file pool is finite.
-    #
-    # photo_idx is the index into PHOTO_FILES (which gives the actual file). We
-    # allow the same filename to be referenced multiple times — but each USE
-    # gets its own photo_id by tagging with a suffix when needed. For the
-    # fixture, we just keep it 1:1 photo_id ↔ filename for simplicity, and pick
-    # different files per segment. So we need at least ~26 distinct files.
-    # PHOTO_FILES has 22; we cycle through, but the duplicate pair (idx 21 +
-    # mirror) uses the same file deliberately for the dedup demo.
-
-    # For each segment that needs photos, we craft 1-3 photo records.
-    # Each photo record knows: photo_idx, segment_id, segment_t (0..1).
-
+    # Segment story (drives photo allocation below):
+    #   S001/S002/S003 GREEN — 3 compliant photos each (9 files)
+    #   S004 YELLOW — 2 photos with a >5m gap (2 files)
+    #   S005 YELLOW — 1 personal-data photo + 1 off-topic photo (2 files)
+    #   S006 YELLOW — duplicate-reuse demo (1 representative + 1 dup) (2 files)
+    #   S007 GREEN — 3 compliant + 1 ELA-flagged (4 files)
+    #   S008 YELLOW — 1 photo flagged latlon ↔ address mismatch (1 file)
+    #   S011 GREEN — 3 compliant (3 files)
+    #   S015 YELLOW — phase tape_laid but warning_tape_visible=no (1 file)
+    #   S009/S010/S012-S014/S016-S020 RED — no photos (0 files)
+    # Total: 24 photo records (23 distinct files + 1 inherited duplicate).
     photo_specs: list[dict] = []
-
-    def add(photo_idx, segment_id, t, **qc_kwargs):
-        photo_specs.append({"photo_idx": photo_idx, "segment_id": segment_id, "t": t, "qc": qc_kwargs})
-
-    # GREEN S001 — 3 photos spread across the segment.
-    add(0, "S001", 0.05, phase="excavation", warning_tape="no", sand_bedding="no",
-        side_view="yes", depth_ref="yes", depth_cm=80, address=FAKE_ADDRESSES[0],
-        latlon="46°33'18.0\"N 14°17'19.0\"E", paper_label="F001-R001-11-or",
-        note="Open trench, clearly visible.")
-    add(1, "S001", 0.45, phase="duct_laid", note="Duct bundle laid in trench.")
-    add(2, "S001", 0.90, phase="sand_bedded", note="Sand bedding poured over ducts.")
-
-    # GREEN S002 — 3 photos.
-    add(3, "S002", 0.10, phase="duct_laid")
-    add(4, "S002", 0.50, phase="sand_bedded")
-    add(5, "S002", 0.92, phase="tape_laid", note="Warning tape laid.")
-
-    # GREEN S003 — reuse files 0,1,2 (we accept the photo_id collision; fixture
-    # only — real pipeline uses sha1, no collisions).
-    # To avoid collision in this fixture, only use a file once.
-    add(6, "S003", 0.05, phase="excavation", depth_ref="yes", depth_cm=85)
-    add(7, "S003", 0.45, phase="depth_measure", depth_ref="yes", depth_cm=85,
-        note="Measuring rod against trench wall.")
-    add(8, "S003", 0.90, phase="duct_laid")
-
-    # GREEN S004
-    add(9, "S004", 0.10, phase="duct_laid")
-    add(10, "S004", 0.55, phase="sand_bedded")
-    add(11, "S004", 0.95, phase="tape_laid")
-
-    # GREEN S005
-    add(12, "S005", 0.08, phase="excavation", depth_ref="yes", depth_cm=82)
-    add(13, "S005", 0.48, phase="duct_laid")
-    add(14, "S005", 0.92, phase="sand_bedded")
-
-    # GREEN S006
-    add(15, "S006", 0.05, phase="duct_laid")
-    add(16, "S006", 0.50, phase="sand_bedded")
-    add(17, "S006", 0.92, phase="tape_laid")
-
-    # YELLOW S007 — 2 photos with a 22m gap (>5m). Photos at t=0.05 (~2m) and
-    # t=0.65 (~26m), gap 24m.
-    add(18, "S007", 0.05, phase="duct_laid")
-    add(19, "S007", 0.65, phase="sand_bedded")
-
-    # YELLOW S008 — single photo personal_data_visible=yes → excluded from compliant.
-    add(20, "S008", 0.50, phase="paper_label", personal_data="yes",
-        note="Worker's face visible in background.")
-
-    # GREEN S009
-    add(0, "S009", 0.05, phase="duct_laid")  # photo_idx 0 reused — would collide
-    # Actually let's not reuse to avoid the collision. We have 22 distinct files.
-    # Restart the photo allocation more carefully.
-    photo_specs.clear()
-
-    next_idx = [0]
-
-    def take():
-        i = next_idx[0]
-        next_idx[0] += 1
-        return i
-
-    def add_real(segment_id, t, **qc_kwargs):
-        i = take()
-        photo_specs.append({"photo_idx": i, "segment_id": segment_id, "t": t, "qc": qc_kwargs})
-
-    def add_specific(photo_idx, segment_id, t, **qc_kwargs):
-        photo_specs.append({"photo_idx": photo_idx, "segment_id": segment_id, "t": t, "qc": qc_kwargs})
-
-    # Plan with 22 distinct files. We'll cover 20 segments but only some get
-    # photos. Distribution:
-    #   GREEN (3 photos each): S001, S002, S003, S004, S005 → 15 photos
-    #   YELLOW S006 (2 photos with gap): 2 photos
-    #   YELLOW S007 (1 personal-data + 1 OK): 2 photos
-    #   YELLOW S008 (duplicate-reuse): 2 photos (1 representative + 1 duplicate copy)
-    #   GREEN S009: 3 photos
-    #   YELLOW S010 (latlon vs address mismatch): 1 photo flagged
-    #   RED S011, S012: 0 photos
-    #   GREEN S013, S014: 3 each = 6
-    #   YELLOW S015 (phase tape_laid but warning_tape_visible=no): 1 photo
-    #   RED S016: 0 photos
-    #   GREEN S017, S018, S019: assume 0 photos (RED) or pick one — let's do
-    #     S017=GREEN(3), S018=RED, S019=RED, S020=YELLOW (1 off-topic + 1 OK)
-    #
-    # Tally: 15 + 2 + 2 + 2 + 3 + 1 + 0 + 0 + 6 + 1 + 0 + 3 + 0 + 0 + 2 = 37
-    # That's > 22. Let me trim.
-
-    # Trim to fit 22 distinct files:
-    #   GREEN S001 → 3
-    #   GREEN S002 → 3
-    #   GREEN S003 → 3
-    #   YELLOW S004 (gap) → 2
-    #   YELLOW S005 (personal-data) → 1
-    #   YELLOW S006 (duplicate-reuse: representative + dup) → 1 rep + 1 dup
-    #         (the dup inherits qc; gets its own manifest+forensics row)
-    #   GREEN S007 → 3
-    #   YELLOW S008 (latlon flag) → 1
-    #   RED S009 → 0
-    #   RED S010 → 0
-    #   GREEN S011 → 3
-    #   YELLOW S012 (phase tape_laid, no tape visible) → 1
-    #   RED S013 → 0
-    #   GREEN S014 → 1 (just barely enough to keep it RED? — no, 1 photo for
-    #         40m is density 1/40m = 0.025/m → less than 1/10m? 40/10=4 photos
-    #         needed → RED). Let me make it GREEN with 3.
-    #   Adjust: GREEN S014 → 0 (RED instead). To balance, S015 GREEN → 3.
-    #
-    # Refined:
-    #   S001 GREEN  3 photos
-    #   S002 GREEN  3 photos
-    #   S003 GREEN  3 photos
-    #   S004 YELLOW 2 photos (gap >5m)
-    #   S005 YELLOW 1 photo personal-data
-    #   S006 YELLOW 1 rep + 1 dup (duplicate reuse demo)
-    #   S007 GREEN  3 photos
-    #   S008 YELLOW 1 photo latlon-vs-address flag
-    #   S009 RED    0 photos
-    #   S010 RED    0 photos
-    #   S011 GREEN  3 photos
-    #   S012 YELLOW 1 photo tape_laid phase but warning_tape=no
-    #   S013 RED    0 photos
-    #   S014 RED    0 photos
-    #   S015 GREEN  3 photos
-    #   S016 RED    0 photos
-    #   S017 RED    0 photos
-    #   S018 RED    0 photos
-    #   S019 RED    0 photos
-    #   S020 RED    0 photos
-    #
-    # Tally: 3+3+3+2+1+1+1+3+1+0+0+3+1+0+0+3+0+0+0+0+0+0 = 25 photo records, but
-    # one is a duplicate inheriting → 24 distinct files. We have 22. Close.
-    # Drop S012 (-1 photo) to 24 → still need 24-1=23 distinct. Drop S015 from
-    # 3→2 photos → 23 records, 22 distinct (one dup) → fits exactly into 22 files.
-
-    # Simplest: change S015 to YELLOW with 2 photos (a gap).
-    # Final tally: 3+3+3+2+1+2+3+1+0+0+3+1+0+0+2+0+0+0+0+0 = 24 records, 23 distinct
-    # files (one is a dup). Still 23 > 22. Drop S012 → 23 records, 22 distinct.
-
-    # OK, let's just go: 22 distinct + 1 duplicate = 23 photo records total.
-
-    photo_specs = []
     file_cursor = 0
 
     def use_next_file() -> int:
@@ -652,6 +483,12 @@ def write_manifest_sqlite(photo_specs: list[dict], path: Path) -> None:
     conn.close()
 
 
+def _stable_hash(pid: str) -> int:
+    """Deterministic across runs — Python's hash() is salted per process,
+    which would churn the committed fixtures on every regenerate."""
+    return int(hashlib.sha1(pid.encode("utf-8")).hexdigest(), 16)
+
+
 def write_forensics(photo_specs: list[dict], path: Path) -> None:
     with path.open("w", encoding="utf-8") as f:
         for spec in photo_specs:
@@ -659,12 +496,12 @@ def write_forensics(photo_specs: list[dict], path: Path) -> None:
             cluster_id = spec.get("phash_cluster_id")
             is_rep = spec.get("is_representative", True)
             if cluster_id is None:
-                cluster_id = abs(hash(pid)) % 100000
+                cluster_id = _stable_hash(pid) % 100000
             qc_kwargs = spec.get("qc") or {}
             ela_flag = bool(qc_kwargs.get("_ela_flag"))
             row = {
                 "photo_id": pid,
-                "phash": f"{abs(hash(pid)) % (16 ** 16):016x}",
+                "phash": f"{_stable_hash(pid) % (16 ** 16):016x}",
                 "phash_cluster_id": cluster_id,
                 "is_phash_representative": is_rep,
                 "ela_score": 0.18 if ela_flag else 0.02,

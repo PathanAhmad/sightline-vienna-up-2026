@@ -73,21 +73,29 @@ class DataPaths:
 
 
 def resolve_paths() -> DataPaths:
-    """Prefer live pipeline outputs; fall back to committed fixtures."""
-    live_ready = (REAL_PROCESSED / "verdicts.csv").exists()
-    if live_ready:
+    """Prefer live pipeline outputs; fall back to committed fixtures.
+
+    All-or-nothing: we only switch to live mode if every required
+    artifact is present. A partial live state (e.g. verdicts.csv landed
+    but manifest.sqlite hasn't yet) would crash a downstream loader, so
+    we stay on fixtures until the pipeline finishes a full run.
+    """
+    live_candidates = {
+        "verdicts_csv": REAL_PROCESSED / "verdicts.csv",
+        "geomatch_csv": REAL_PROCESSED / "geomatch.csv",
+        "readqc_jsonl": REAL_PROCESSED / "readqc.jsonl",
+        "forensics_jsonl": REAL_PROCESSED / "forensics.jsonl",
+        "manifest_sqlite": REAL_PROCESSED / "manifest.sqlite",
+        "trenches_geojson":
+            REAL_GEO / "CLP20417A-P1-B00_Trenches.geojson",
+        "fcps_geojson":
+            REAL_GEO / "CLP20417A-P1-B00_FCP_Polygons.geojson",
+        "cluster_geojson":
+            REAL_GEO / "CLP20417A-P1-B00_SiteCluster_Polygons.geojson",
+    }
+    if all(p.exists() for p in live_candidates.values()):
         return DataPaths(
-            source="live",
-            verdicts_csv=REAL_PROCESSED / "verdicts.csv",
-            geomatch_csv=REAL_PROCESSED / "geomatch.csv",
-            readqc_jsonl=REAL_PROCESSED / "readqc.jsonl",
-            forensics_jsonl=REAL_PROCESSED / "forensics.jsonl",
-            manifest_sqlite=REAL_PROCESSED / "manifest.sqlite",
-            trenches_geojson=REAL_GEO / "CLP20417A-P1-B00_Trenches.geojson",
-            fcps_geojson=REAL_GEO / "CLP20417A-P1-B00_FCP_Polygons.geojson",
-            cluster_geojson=REAL_GEO
-            / "CLP20417A-P1-B00_SiteCluster_Polygons.geojson",
-            photos_root=REAL_PHOTOS_DIR,
+            source="live", photos_root=REAL_PHOTOS_DIR, **live_candidates
         )
     return DataPaths(
         source="fixtures",
@@ -307,6 +315,17 @@ def photo_path_for(photo_id: str, manifest: dict, photos_root: Path) -> Path | N
     return None
 
 
+def _fmt_meters(value: Any) -> str:
+    """Render a length-in-meters value tolerantly. NaN / None → '?'."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    if f != f:  # NaN
+        return "?"
+    return f"{f:g} m"
+
+
 def render_check_pill(value: str) -> str:
     """Tiny inline HTML pill for a yes/no/occluded check value."""
     color = {
@@ -371,7 +390,8 @@ def render_segment_panel(
     )
     st.caption(
         f"FCP {v.get('fcp_name','?')} · length "
-        f"{v.get('length_m','?')}m · {v.get('photo_count',0)} photos snapped · "
+        f"{_fmt_meters(v.get('length_m'))} · "
+        f"{v.get('photo_count',0)} photos snapped · "
         f"{v.get('compliant_photo_count',0)} compliant"
     )
 
@@ -474,7 +494,7 @@ def render_header(
     n_personal_data = sum(
         1 for r in readqc if r.get("personal_data_visible") == "yes"
     )
-    n_dup_clusters = max(0, len(forensics) - sum(
+    n_duplicate_photos = max(0, len(forensics) - sum(
         1 for r in forensics if r.get("is_phash_representative")
     ))
     n_ela = sum(1 for r in forensics if r.get("ela_flag"))
@@ -493,10 +513,10 @@ def render_header(
     c4.metric("Run cost", f"${total_cost:.2f}")
 
     chips = []
-    if n_dup_clusters:
+    if n_duplicate_photos:
         chips.append(
-            (f"{n_dup_clusters} duplicate photo"
-             f"{'s' if n_dup_clusters != 1 else ''} (re-submitted across jobs)",
+            (f"{n_duplicate_photos} duplicate photo"
+             f"{'s' if n_duplicate_photos != 1 else ''} (re-submitted across jobs)",
              "#a855f7"))
     if n_geo_mismatch:
         chips.append(
@@ -631,10 +651,16 @@ def _segment_id_from_click(
             return sid
     tip = click.get("last_object_clicked_tooltip")
     if isinstance(tip, str):
-        # Tooltip text like 'Segment S004 FCP F001 Verdict YELLOW Length …'
+        # Tooltip text like 'Segment S004 FCP F001 Verdict YELLOW Length …'.
+        # The GeoJsonTooltip emits fields in declared order, so segment_id
+        # is the FIRST cell. Pick the first token that matches a known id,
+        # not just any token — avoids accidental matches against FCP names
+        # or other tooltip fields if a future feature shares a segment_id
+        # value (e.g. globalIDs with curly braces).
+        known_set = set(known_ids)
         for token in tip.replace("\n", " ").split():
             token = token.strip().strip(":,")
-            if token in known_ids:
+            if token in known_set:
                 return token
     return None
 
@@ -662,14 +688,14 @@ def _render_top_issues(verdicts: pd.DataFrame) -> None:
 
 
 def _render_deficiency_download(verdicts: pd.DataFrame) -> None:
-    """A one-click CSV download mirrors deficiency.csv from src/report.py."""
+    """A one-click CSV download. Same shape as src/report.py's
+    deficiency.csv so a reviewer gets identical artifacts whether they
+    download from the UI or fetch from the report directory."""
+    # Import here to avoid a top-level src dependency in the demo path.
+    from src.report import DEFICIENCY_FIELDS
     bad = (
-        verdicts[verdicts["verdict"] != "GREEN"][
-            [
-                "segment_id", "fcp_name", "length_m", "photo_count",
-                "compliant_photo_count", "max_gap_m", "verdict", "reasons",
-            ]
-        ].sort_values(["fcp_name", "length_m"], ascending=[True, False])
+        verdicts[verdicts["verdict"] != "GREEN"][list(DEFICIENCY_FIELDS)]
+        .sort_values(["fcp_name", "length_m"], ascending=[True, False])
     )
     st.download_button(
         "Download deficiency CSV (RED + YELLOW segments)",
