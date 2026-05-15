@@ -7,3 +7,9 @@
 # Local screenshots and personal prep (not for team repo)
 *.png
 linkedin-profile-snapshot.md
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

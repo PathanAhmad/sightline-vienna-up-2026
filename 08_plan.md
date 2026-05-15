@@ -119,7 +119,7 @@ Two people can hold multiple roles. Solo + 1 teammate = both wear 2-3 hats each.
 ## Pre-Friday checklist (each of us, before doors open)
 
 - [ ] Joined the Slack (`europetechhac-yix2175`)
-- [ ] Python 3.11 + uv installed, plus: `pillow piexif imagehash imagededup geopandas shapely folium ultralytics streamlit fastapi anthropic`
+- [ ] Python 3.11 + uv installed; run `uv sync` at the repo root to materialize the lean lib set (see [pyproject.toml](pyproject.toml)): `pillow pillow-heif imagehash geopandas folium streamlit anthropic numpy opencv-python-headless`. **Skipped on purpose:** `piexif` (Pillow reads EXIF/GPS natively), `imagededup` (pulls torch ~2.5 GB, redundant with `imagehash`), `fastapi` (Streamlit is one process), `ultralytics` (3–6 GB + CUDA roulette + 30-image / 4-class / 4-hour training is below the practical floor — VLM does the QC questions). If we decide we *do* need bounding boxes Saturday, fall back to YOLO-World zero-shot, no training.
 - [ ] Anthropic or OpenAI API key, €20+ credit
 - [ ] GitHub access ready (we'll spin a private repo Friday)
 - [ ] Read [03_challenge_2_construction_ai.md](03_challenge_2_construction_ai.md) and [06_tech_resources.md](06_tech_resources.md) on the train

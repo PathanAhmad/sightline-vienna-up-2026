@@ -1,0 +1,19 @@
+[project]
+name = "vienna-up"
+version = "0.1.0"
+description = "Vienna UP! 2026 hackathon — Challenge 2 (construction-photo QC for fiber trench inspection)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "pillow",
+  "pillow-heif",
+  "imagehash",
+  "geopandas",
+  "folium",
+  "streamlit",
+  "anthropic",
+  "numpy",
+  "opencv-python-headless",
+]
+
+[tool.uv]
+# Pin Python 3.11 so the venv we ship Friday matches what we tested Thursday.

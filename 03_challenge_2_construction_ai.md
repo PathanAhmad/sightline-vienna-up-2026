@@ -136,36 +136,52 @@ A rough segmentation Saturday > a polished slide deck.
 
 ## Tech recipe (greenfield in 48 h, opinionated)
 
-### Stack
-- **Python 3.11** + uv / poetry
-- **FastAPI** for the backend
-- **Streamlit** or **Gradio** for the demo UI (fastest to ship)
-- Alternative: Next.js + Leaflet if a teammate is a strong React dev
+> **Updated 2026-05-15 after research pass.** The earlier version of this doc leaned on YOLOv8 fine-tuning as the central CV move. Research overturned that — see [06_tech_resources.md](06_tech_resources.md) for the full rationale. New plan below.
+
+### Stack (lean, installed via [pyproject.toml](pyproject.toml))
+- **Python 3.11** + uv (`uv sync` at repo root)
+- **Streamlit** for the UI — one process, handles UI + logic, no separate FastAPI for the spine
+- **Claude Haiku 4.5** as the QC engine (cost: ~$0.60 for all 500 photos via Batch API)
+- Classical CV (`imagehash` + ELA-via-Pillow) for the forensics signals
 
 ### Image ingest & EXIF
-- `Pillow` — image I/O, basic EXIF
-- `piexif` or `exifread` — robust EXIF including GPS
-- `GPSPhoto` — convenience for lat/lon extraction
-- `pyproj` — coordinate transforms if route is in EPSG:31287 (Austrian Lambert)
+- `Pillow` 12+ — image I/O + EXIF/GPS via `getexif().get_ifd(IFD.GPSInfo)` (drops `piexif`/`exifread`)
+- `pillow-heif` — iPhone photos default to HEIC; **Claude API doesn't accept HEIC**, must convert to JPEG before upload
+- `pyproj` — installed transitively via geopandas; coordinate transforms if route is EPSG:31287 (Austrian Lambert)
 
 ### Geo-matching
-- `shapely` + `geopandas` — segment geometry, nearest-segment lookup
-- `folium` or `leaflet.js` — interactive map output
-- Buffer route by ~5 m, find nearest-point per photo
+- `geopandas` (1.0+ uses `pyogrio`, no Fiona/GDAL pain on Windows in 2026) — one-line `gpd.sjoin_nearest`
+- `folium` for the interactive map
+- ÖGIG GeoJSON CRS check FIRST: 4326 vs 31287. Reproject once to metric (3857 or 31287) before distance ops.
 
 ### Computer vision — the QC checks
-- **Object presence (duct, ruler, sand, seal):** fine-tune **YOLOv8** on a tiny labelled set. The brief implies they'll give us photos — we label ~50 in Roboflow, train 100 epochs, demo on the rest.
-- **OCR on ruler:** `easyocr` or `paddleocr` → read depth in cm
-- **Quality (blur, exposure):** Laplacian variance + histogram stats
-- **Privacy redaction:** an off-the-shelf face/plate detector (e.g. `yolov8n-face`, plus a license-plate model)
+- **Object presence (duct, ruler, sand, seal):** **Claude Haiku 4.5 vision** with a strict JSON schema (see [06_tech_resources.md](06_tech_resources.md#claude-vision--the-qc-engine-haiku-45-default-batch--caching)). Not a fine-tuned YOLO — 30 hand-labels / 4 classes / 4 hours is below the practical small-data floor, and VLMs reliably win on "is X present" questions. Plan B for bounding boxes (e.g. auto-cropping a ruler to OCR tick marks): YOLO-World zero-shot, no training.
+- **OCR on ruler:** ask Claude to read the value directly; if accuracy drops, crop with YOLO-World + read with a stronger model. Skip standalone `easyocr`/`paddleocr` unless we hit a wall — they pull torch.
+- **Quality (blur, exposure):** Laplacian variance via `cv2` (cheap, 5 lines)
+- **Privacy redaction:** Claude can flag presence; if we need pixel-level redaction, pull a face/plate model only at that point.
 
-### Forensics (the "is this real?" pile)
-- **Duplicate detection:** `imagehash` (pHash/dHash) + BK-tree for fast NN search; or `imagededup`
-- **Manipulation:** `ELA` via Pillow recompression diff; `forensically` techniques (noise residual); for a stretch goal, `MantraNet` (pretrained)
-- **EXIF sanity:** check `DateTimeOriginal` vs `GPSDateStamp`, software field (`Adobe Photoshop` is a red flag), check `ModifyDate > CreateDate`
+### Forensics (the "is this real?" pile — our likely differentiator, see Strategic angle below)
+- **Duplicate detection:** `imagehash` pHash with Hamming-distance threshold ~6. (Skipping `imagededup` — pulls torch ~2.5 GB, redundant for our scale.)
+- **Manipulation:** ELA hand-rolled with `Pillow.ImageChops.difference` against a quality-90 re-save (~15 lines). If we want a real forensics library, [`PhotoHolmes`](https://github.com/photoholmes/photoholmes) bundles ELA + Splicebuster + TruFor + CAT-Net behind one API.
+- **EXIF sanity:** `DateTimeOriginal` vs `GPSDateStamp` agreement, `Software` field flags (`Adobe Photoshop`, `Snapseed`), `ModifyDate > CreateDate`.
+- **Cross-photo recycling:** pHash + EXIF-timestamp + GPS-cluster across the corpus → catch photos submitted across multiple segments.
 
-### Vision-language stretch
-- `OpenAI` / `Anthropic Claude` vision API for explanatory captions: *"This photo shows a partially-buried micro-duct without visible sand bedding."* — cheap, fast to ship, judges love it.
+---
+
+## Strategic angle (research-driven, 2026-05-15)
+
+**The market already exists.** [Deepomatic Lens](https://www.iqgeo.com/blog/real-time-visual-ai-in-fiber-network-construction-building-it-right-the-first-time) (now in IQGeo's telecom suite) is purpose-built for fiber technicians to photograph a trench/splice/cabinet and get instant pass/fail on depth, cable presence, OCR-read cable IDs, seal integrity. Competitors: Groundhawk (UK, fiber-specific), AI Clearing (Austin), Sitetracker Scout (2025), and Vienna-based PlanRadar for the doc-mgmt layer.
+
+**Pitch consequence:** name Deepomatic in slide 2 — proves we know the market. Then frame our differentiator: **cross-photo authenticity / recycling detection.** None of the commercial fiber-QC tools market this; insurance-fraud platforms (TruthScan, Verisk) do. The killer demo line: *"this photo was already submitted on job #4471, three weeks ago."*
+
+**ÖGIG's actual spec** (per oegig.at/oefiber/): trench depth **30–40 cm**. Hard-code this number into the rule prompt — concrete beats generic industry norms.
+
+**Cost of running 500 photos through Claude:** ~$0.60 on Haiku 4.5 + Batch API. The API budget is not a constraint; iterate freely.
+
+**Shortcuts to bookmark (don't reinvent):**
+- HF dataset `LouisChen15/ConstructionSite` — VQA + rule-violation annotations including underground/excavation scenes
+- GitHub `Co-UDlabs/sewer_defects` — reference-object-based depth measurement code (directly applicable to ruler-in-photo)
+- arXiv 2512.13974 — multi-layer VLM→LLM pipeline architecture for site inspection (the pattern we're copying)
 
 ### Output
 - HTML report (Jinja2) + Folium map embedded
@@ -210,6 +226,6 @@ trench-qc/
 ## Risks / pitfalls to avoid
 
 - **Building privacy redaction first** is a trap — it's the easiest sub-task but not the highest-value signal. Do geo-match + duct/bedding detection first.
-- **Overtraining YOLO with too few labels** — better to keep model simple, use prompt-engineered Claude/GPT vision for explanations rather than chase a perfect detector.
+- ~~**Overtraining YOLO with too few labels**~~ — already decided: skip YOLO entirely, use Claude vision as the QC engine. See Strategic angle above and [06_tech_resources.md](06_tech_resources.md).
 - **Don't believe the EXIF GPS blindly** — phones strip/round GPS. Have a fallback: filename parsing, manual upload, or LLM-extracted hint.
 - **Coordinate systems** — ÖGIG GeoJSON might be EPSG:4326 or Austria's 31287 / 31256. Check before you geomatch or all your points land in the wrong country.

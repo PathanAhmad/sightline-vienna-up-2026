@@ -101,6 +101,9 @@ Be explicit Friday: "I want to win, not just attend. Are you in for ~36 h of foc
 - **Number first sentence.** "Five hundred photos. Forty-two million euros. Fifty years of liability. One AI check."
 - **Live demo > slides.** Spend ≥60 % of the 3 min on the working tool.
 - **Name the buyer in slide 2.** Not "operators" — name *ÖGIG* (in the room) or "EU manufacturers preparing for 18 Feb 2027".
+- **Name the competitor we're leapfrogging.** Deepomatic Lens / IQGeo already do per-photo pass/fail for fiber. Our differentiator: **cross-photo recycling detection** — they don't.
+- **The killer demo line.** "*This photo was already submitted on job #4471, three weeks ago.*" — that's the moment that wins the room.
+- **Cite ÖGIG's own spec.** Trench depth **30–40 cm** (per oegig.at/oefiber/). Concrete number in front of Fuhrmann beats a generic norm.
 - **Show one number we'd save** (hours, € or risk).
 - **End with what's next, not a thank-you.** "Next: contractor scorecards across 100+ projects."
 

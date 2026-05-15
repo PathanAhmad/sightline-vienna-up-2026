@@ -66,7 +66,7 @@ Jan Juriga (Wirtschaftsagentur Wien) · Kati Schneeberger (BEJ) · Johannes Adle
 
 - [ ] Join the Slack
 - [ ] Pre-register weclapp ([partner link](https://www.weclapp.com/en/register/?partnercode=P2289)) and Odoo
-- [ ] Install Python 3.11 + uv, pre-pull main libs
+- [ ] Install Python 3.11 + uv, then `uv sync` at the repo root (lib choices and skip-list rationale in [08_plan.md](08_plan.md))
 - [ ] Anthropic/OpenAI API key with €20+ credit
 - [ ] Read [07_strategy.md](07_strategy.md) on the train
 - [ ] Empty laptop disk / charge phone / ID in wallet

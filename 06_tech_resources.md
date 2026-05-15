@@ -89,52 +89,52 @@ trench-qc/
   pyproject.toml
 ```
 
-### `pyproject.toml` (uv-friendly)
+### `pyproject.toml` (uv-friendly — actual)
+
+The committed [pyproject.toml](pyproject.toml) at the repo root is the source of truth. It deliberately ships a lean set, with the rationale below for what was cut from earlier drafts:
+
 ```toml
 [project]
-name = "trench-qc"
+name = "vienna-up"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
   "pillow",
-  "piexif",
-  "exifread",
-  "imagehash",
-  "imagededup",
-  "geopandas",
-  "shapely",
-  "pyproj",
+  "pillow-heif",            # iPhone photos are HEIC; Claude API needs JPEG
+  "imagehash",              # pHash dedup; 50 MB total deps
+  "geopandas",              # 1.0+ uses pyogrio — no Fiona/GDAL pain on Windows
   "folium",
-  "ultralytics",      # YOLOv8
-  "easyocr",
-  "opencv-python-headless",
-  "fastapi",
-  "uvicorn",
   "streamlit",
-  "jinja2",
-  "anthropic",        # for VLM explanations
-  "python-dotenv",
+  "anthropic",              # VLM as the QC engine, not a sidecar
+  "numpy",
+  "opencv-python-headless",
 ]
 ```
 
-### EXIF + GPS extraction
-```python
-from PIL import Image, ExifTags
-from PIL.ExifTags import GPSTAGS
+**Cut on purpose:**
+- `piexif`, `exifread` — `PIL.ExifTags` reads GPS cleanly in Pillow 12+
+- `imagededup` — pulls torch (~2.5 GB), redundant with `imagehash` for our scale
+- `shapely`, `pyproj` — installed transitively by geopandas; no need to list
+- `ultralytics`, `easyocr` — 3–6 GB + CUDA roulette; 30-image / 4-class training in <4 h is below the practical floor (Ultralytics' own small-data guidance + 2025 hackathon postmortems agree). VLM handles "is X present" better; YOLO-World zero-shot is a Plan-B if we genuinely need bounding boxes.
+- `fastapi`, `uvicorn`, `jinja2` — Streamlit is one process; only add if Saturday we split front/back
+- `python-dotenv` — Streamlit reads `.env` natively via `st.secrets`
 
-def exif_dict(path):
-    img = Image.open(path)
-    raw = img._getexif() or {}
-    return {ExifTags.TAGS.get(k, k): v for k, v in raw.items()}
+### EXIF + GPS extraction (Pillow 12 API, HEIC-safe)
+```python
+import pillow_heif
+from PIL import Image
+from PIL.ExifTags import IFD, GPS
+
+pillow_heif.register_heif_opener()  # HEIC support for iPhone photos
 
 def gps_of(path):
-    ex = exif_dict(path)
-    g = ex.get("GPSInfo")
-    if not g: return None
-    g = {GPSTAGS.get(k, k): v for k, v in g.items()}
-    def dms(t): return t[0] + t[1]/60 + t[2]/3600
-    lat = dms(g["GPSLatitude"]) * (-1 if g["GPSLatitudeRef"] == "S" else 1)
-    lon = dms(g["GPSLongitude"]) * (-1 if g["GPSLongitudeRef"] == "W" else 1)
+    exif = Image.open(path).getexif()
+    g = exif.get_ifd(IFD.GPSInfo)
+    if not g or GPS.GPSLatitude not in g:
+        return None
+    def dms(t): return float(t[0]) + float(t[1]) / 60 + float(t[2]) / 3600
+    lat = dms(g[GPS.GPSLatitude]) * (-1 if g[GPS.GPSLatitudeRef] == "S" else 1)
+    lon = dms(g[GPS.GPSLongitude]) * (-1 if g[GPS.GPSLongitudeRef] == "W" else 1)
     return (lat, lon)
 ```
 
@@ -176,41 +176,85 @@ def ela(path, quality=90):
     return diff   # bright regions = recompression-sensitive = likely edited
 ```
 
-### YOLOv8 finetune on a tiny labelled set
-```python
-from ultralytics import YOLO
-model = YOLO("yolov8n.pt")
-model.train(data="data/dataset.yaml", epochs=80, imgsz=640, batch=16)
-results = model("data/photos/sample.jpg")
-```
-Use **Roboflow** to label 30–50 images Friday night for classes: `duct, sand_bed, ruler, seal, pipe_end`. Don't over-engineer — 50 labelled images beats no labels.
+### YOLO — skipped (with a Plan B)
 
-### Claude vision for explanations
+We are **not** training a custom YOLO model. Reasons (all from research, not vibes):
+- 30 hand-labeled images / 4 classes is below the practical small-data floor; Ultralytics' own guidance is "hundreds per class," and freeze-backbone-with-augmentation still overfits hard on demo-day off-distribution photos.
+- 3–6 GB install + Windows CUDA roulette eats setup time we don't have.
+- Demo failure risk is asymmetric: a YOLO that fires false-positives on the judge's chosen photo loses the room.
+
+**Plan B if Saturday we genuinely need a bounding box** (e.g. auto-cropping the ruler so the VLM can read tick marks): use **YOLO-World** zero-shot — text-prompted detection, no training, no labeling. Pre-cache the weights Thursday if we want it on the table.
+
+### Claude vision — the QC engine (Haiku 4.5 default, Batch + caching)
+
+Cost reality per [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) for 500 photos:
+
+| Model | Standard | Batch API (50% off) |
+|---|---|---|
+| Haiku 4.5 | ~$1.20 | ~**$0.60** |
+| Sonnet 4.6 | ~$3.40 | ~$1.70 |
+| Opus 4.7 | ~$8 | ~$4 |
+
+**Default Haiku 4.5.** Escalate to Sonnet only on photos where Haiku returns "ambiguous." Use the **Batch API** for the full pass (non-realtime). Cache the system prompt + few-shot + ÖGIG rule list (identical across all 500 calls) — cache reads cost 0.1× input.
+
 ```python
-import anthropic, base64
+import anthropic, base64, pillow_heif
+from PIL import Image
+from io import BytesIO
+
+pillow_heif.register_heif_opener()  # iPhone HEIC support
+
 client = anthropic.Anthropic()
-def describe(img_path):
-    b64 = base64.b64encode(open(img_path, "rb").read()).decode()
+
+QC_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "duct_visible":          {"type": "string", "enum": ["yes", "no", "occluded"]},
+        "bedding_sand_visible":  {"type": "string", "enum": ["yes", "no", "occluded"]},
+        "ruler_legible":         {"type": "string", "enum": ["yes", "no", "occluded"]},
+        "end_seals_present":     {"type": "string", "enum": ["yes", "no", "occluded"]},
+        "estimated_depth_cm":    {"type": ["integer", "null"]},  # ÖGIG spec: 30–40 cm
+        "note":                  {"type": "string", "maxLength": 200},
+    },
+    "required": ["duct_visible", "bedding_sand_visible", "ruler_legible",
+                 "end_seals_present", "estimated_depth_cm", "note"],
+}
+
+SYSTEM = (
+    "You are a fiber-trench QC inspector for ÖGIG. ÖGIG's spec requires trench depth "
+    "30–40 cm with sand bedding around the duct and end seals on every duct. "
+    "Evaluate the photo against this checklist. If a detail is occluded or unclear, "
+    "say 'occluded' rather than guessing."
+)
+
+def qc(img_path: str) -> dict:
+    img = Image.open(img_path).convert("RGB")             # HEIC → RGB
+    img.thumbnail((1092, 1092))                            # ≤1568 image tokens
+    buf = BytesIO(); img.save(buf, "JPEG", quality=88)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
     msg = client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5-20251001",
         max_tokens=400,
+        system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
         messages=[{
             "role": "user",
             "content": [
+                # Anthropic's own guidance: image BEFORE text
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                {"type": "text", "text": (
-                    "Fiber-trench QC: in 1 paragraph, state whether this photo shows "
-                    "(a) a clearly visible duct/conduit, (b) sand bedding around it, "
-                    "(c) a depth ruler legible, (d) end seals on duct, (e) any privacy issues. "
-                    "Return JSON with booleans + a one-line note."
-                )},
+                {"type": "text", "text": "Return JSON matching the QC schema."},
             ],
         }],
+        # Structured Outputs: strict schema, no regex parsing
+        # https://platform.claude.com/docs/en/build-with-claude/structured-outputs
     )
-    return msg.content[0].text
+    return msg.content[0].text  # JSON string per schema
 ```
 
-> This is the cheapest path to a defensible "AI signal" — even with zero training data, you have plausibility from day 1, and YOLO adds determinism on top.
+**Throughput:** prefer one image per request in parallel (better isolation, easier retries) over multi-image batching, unless cross-photo comparison is needed. For the full 500-photo pass, use the [Batch API](https://platform.claude.com/docs/en/build-with-claude/batch-processing).
+
+**HEIC gotcha:** Anthropic API does **not** accept HEIC. iPhone photos must be converted to JPEG before upload — the `pillow-heif` opener above + `.convert("RGB")` + JPEG save handles it.
 
 ### Folium map output
 ```python
@@ -254,7 +298,7 @@ Keep it to 5–6 slides. Demo eats the time, slides are bumper rails.
 
 - [ ] Join the Slack
 - [ ] Pre-register weclapp **and** Odoo (free trials)
-- [ ] Pre-install Python + uv + main libs locally (no installs on venue Wi-Fi)
+- [ ] Pre-install Python + uv + main libs locally — `uv sync` at repo root (no installs on venue Wi-Fi)
 - [ ] Anthropic / OpenAI API key set up with €20 credit minimum
 - [ ] GitHub private repo seeded
 - [ ] Read [02_challenge_1_dpp_erp.md](02_challenge_1_dpp_erp.md) and [03_challenge_2_construction_ai.md](03_challenge_2_construction_ai.md) on the train
