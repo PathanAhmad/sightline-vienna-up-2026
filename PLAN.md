@@ -40,13 +40,14 @@ Python 3.11 + uv · Streamlit (no FastAPI — one process) · Claude Haiku 4.5 v
 
 ```
 01 ingest       → walk photos, load GeoJSONs into geopandas
-02 readoverlay  → Claude vision OCR: pull date, street, FCP code (+ lat/lon if printed) from each photo
-03 qc           → Claude vision: the 5 visual checks per photo (warning tape, sand, side view, depth ref, duct)
-04 forensics    → pHash dedup across the corpus + ELA pass for tamper hints
-05 geomatch     → join OCR'd address / FCP code → GeoJSON cluster / FCP / segment
-06 classify     → roll up per-segment: complete / partial / missing
-07 report       → Streamlit UI: folium map + clickable segment panel + downloadable deficiency CSV
+02 forensics    → pHash dedup across the corpus (cheap, no API) + ELA pass for tamper hints
+03 readqc       → ONE Claude vision call per unique photo: overlay fields (date, street, lat/lon, FCP code) AND the 5 visual checks (warning tape, sand, side view, depth ref, duct)
+04 geomatch     → (a) lat/lon ↔ printed-address sanity check, then (b) join OCR'd address / FCP code → GeoJSON cluster / FCP / segment
+05 classify     → roll up per-segment: complete / partial / missing
+06 report       → Streamlit UI: folium map + clickable segment panel + downloadable deficiency CSV; surface the "obvious-error" flags (duplicates + geo-mismatch) at the top
 ```
+
+**Pre-filter ordering rationale (added 2026-05-15 PM):** dedup runs *before* the Claude call so we don't pay to score the same image twice — one representative per pHash cluster goes through `readqc`, the duplicates inherit its result with a `duplicate_of=…` tag. The lat/lon-vs-address sanity check is a few lines of post-processing on `readqc`'s output (forward-geocode the address with Nominatim, compute haversine to the printed coords, flag if > 100 m). It only fires on photos where both fields are present (~70% of the sample); the rest fall through to FCP-code / route-data matching.
 
 Folder skeleton to create Friday night:
 
@@ -70,18 +71,24 @@ Each stage prints what it did in plain English. Example: `[qc] 3920/3929 scored,
 
 ## The geomatch redesign (biggest single change from the old plan)
 
-**Old plan assumed EXIF GPS.** Wrong — 200/200 sampled photos have no EXIF.
+**Old plan assumed EXIF GPS.** Wrong — of 720 files in `Resources/all/`, only 5 have any GPS in EXIF (WhatsApp strips it). The signal we use instead is the **overlay text the camera app burns into the photo** (date, lat/lon, address) plus the **paper FCP label** that sometimes appears physically inside the frame.
+
+**Why a vision model, not OCR + regex (10-photo spread sample, 2026-05-15 PM):**
+- **Overlay position varies.** Most are bottom-right, but several are top-right, and the "GPS Map Camera" app puts it top-left. No fixed crop covers all cases.
+- **Lat/lon has at least three formats in the wild:** DMS with symbols (`46°33'56.226"N 14°17'5.222"E`), decimal without separators (`46.56153856N 14.28786228E`), and labeled decimal (`Lat 46.551997, Long 14.294176`).
+- **Language mixes German, English, and Cyrillic** on the *same* fields — e.g. country renders as `Austria`, `Австрия`, or `Kärnten`.
+- **~30% of sampled photos show no visible lat/lon at all** — just date + address. Any extractor has to degrade gracefully when coords are missing.
+- A regex pipeline would silently fail on a meaningful fraction of the corpus; Claude vision handles every variation in one shot, returns structured JSON, and also reads the paper FCP label when present.
 
 **What we do:**
-1. **OCR the photo overlay** with Claude vision in the same call that runs the QC checks. Extract: date, street + house number, city, optional lat/lon, optional paper-label code.
-2. **Paper-label codes** look like `F170-R084-11-or`. `F170` matches an `fcpName` in `FCPs.geojson`. `R084` matches `ductMainShort` in `Trenches.geojson`. The suffix is segment + duct colour code.
-3. **Match logic, in order of preference:**
+1. **One Claude vision call per unique photo** (post-dedup) returns the overlay fields *and* the QC signals together — see schema below. Caches the system prompt + 4 exemplars; cache reads cost 0.1× input.
+2. **Sanity flag — lat/lon vs printed address.** If both are present in the overlay, forward-geocode the address (Nominatim, cached locally per unique address) and compare to the printed coords with the haversine formula. Distance > ~100 m → flag the photo. Catches OCR errors and reused/recycled photos where the camera app's coords got out of sync with the address.
+3. **Paper-label codes** look like `F170-R084-11-or`. `F170` matches an `fcpName` in `FCPs.geojson`. `R084` matches `ductMainShort` in `Trenches.geojson`. The suffix is segment + duct colour code.
+4. **Match logic to route data, in order of preference:**
    - If lat/lon is printed → drop a point, distance-join to the nearest trench segment.
    - Else if FCP code on paper label → join to that FCP's segments directly.
    - Else if street + house number → cluster within the SiteCluster polygon (or group by street name as a fallback).
-4. **Check 6 (location consistency):** OCR'd address city must fall inside the SiteCluster polygon (Maria Rain). FCP code on paper must match the cluster ID. Flag mismatches.
-
-One Claude vision call returns OCR + QC together. Cheaper than two calls. Cache the system prompt + 4 exemplars; cache reads cost 0.1× input.
+5. **Check 6 (location consistency):** OCR'd address city must fall inside the SiteCluster polygon (Maria Rain). FCP code on paper must match the cluster ID. Flag mismatches.
 
 ## Claude prompt sketch (one call per photo)
 
@@ -166,7 +173,8 @@ System prompt loads the 4 root exemplars (`bad`, `duct_sand`, `duct_depth`, `war
 
 ## Risks / what not to do
 
-- **Don't rebuild the EXIF-GPS path.** It's empty; OCR the overlay instead.
+- **Don't rebuild the EXIF-GPS path.** It's empty for 715/720 photos; OCR the overlay instead.
+- **Don't try a fixed-crop + regex overlay parser.** Overlay position, lat/lon format, and language all vary across the corpus — see the geomatch redesign section. Claude vision is the extractor.
 - **Don't hard-code "30–40 cm" depth.** That was a fiber spec. Wait for Martin's APG number.
 - **Don't burn time on pixel-level privacy redaction.** Flag-only is enough for the prototype.
 - **Don't commit `Resources/` or `.audit_samples/`.** NDA on route data.
