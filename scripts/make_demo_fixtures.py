@@ -626,14 +626,18 @@ def write_verdicts(photo_specs: list[dict], segments: list[dict], path: Path) ->
         "S019": "RED",    "S020": "RED",
     }
 
+    def s004_gap_meters(length_m: float) -> tuple[int, int]:
+        """Two photos at t=0.05 and t=0.70 -- gap ~65% of segment length.
+        Both reason_for and max_gap_for must read the same numbers, so
+        compute once here."""
+        return round(length_m * 0.05), round(length_m * 0.70)
+
     def reason_for(sid: str, verdict: str, length_m: float) -> str:
         length_str = f"{round(length_m)}m"
         if verdict == "RED":
             return "no photos snapped to this segment"
         if sid == "S004":
-            # Two photos at t=0.05 and t=0.70 → gap is ~65% of length.
-            m_a = round(length_m * 0.05)
-            m_b = round(length_m * 0.70)
+            m_a, m_b = s004_gap_meters(length_m)
             return (
                 f"max gap {m_b - m_a}m > 5m "
                 f"between meter {m_a} and meter {m_b}"
@@ -658,8 +662,8 @@ def write_verdicts(photo_specs: list[dict], segments: list[dict], path: Path) ->
         if verdict == "RED":
             return float(length_m)
         if sid == "S004":
-            # Matches the meter-positions used in reason_for above.
-            return round(length_m * 0.65, 1)
+            m_a, m_b = s004_gap_meters(length_m)
+            return float(m_b - m_a)
         if verdict == "YELLOW":
             return 12.0
         return 4.0  # GREEN

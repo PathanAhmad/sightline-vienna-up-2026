@@ -2,7 +2,7 @@ segment_id,fcp_name,length_m,photo_count,compliant_photo_count,max_gap_m,density
 S001,F001,58.3,3,3,4.0,0.26,GREEN,all checks ok; 3 compliant photos covering 58m
 S002,F001,50.0,3,3,4.0,0.30,GREEN,all checks ok; 3 compliant photos covering 50m
 S003,F001,51.5,3,3,4.0,0.29,GREEN,all checks ok; 3 compliant photos covering 52m
-S004,F001,47.2,2,1,30.7,0.11,YELLOW,max gap 31m > 5m between meter 2 and meter 33
+S004,F001,47.2,2,1,31.0,0.11,YELLOW,max gap 31m > 5m between meter 2 and meter 33
 S005,F001,49.5,2,1,12.0,0.10,YELLOW,1 personal-data photo excluded; 1 off-topic photo excluded; no other photos
 S006,F001,49.5,2,1,12.0,0.10,YELLOW,"duplicate photo reused on this segment (1 representative, 1 inherited duplicate)"
 S007,F001,49.5,4,4,4.0,0.40,GREEN,3 compliant photos covering 50m; 1 photo ELA-flagged (kept; soft warning)
