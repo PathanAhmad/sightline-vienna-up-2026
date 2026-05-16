@@ -46,7 +46,7 @@ from src.ui import (
     topbar,
     upload_panel,
 )
-from src.ui.components.hero import HeroStats
+from src.ui.components.hero import HeroStats, ModelSpend
 from src.ui.components.live_geomatch import (
     _load_geom_utm,
     qc_to_geomatch_row,
@@ -186,26 +186,128 @@ def load_geojson(path_str: str) -> dict:
 
 # ---- Stats --------------------------------------------------------------
 
+SONNET_MODEL_ID = "claude-sonnet-4-6"
+HAIKU_MODEL_ID = "claude-haiku-4-5"
+
+
+def _spend_by_model(readqc: list[dict], audit_path: Path) -> dict[str, ModelSpend]:
+    """Aggregate per-photo cost (from readqc.jsonl) and per-batch wall time
+    (from audit.jsonl readqc stage_start/end pairs), keyed by model id."""
+    cost: dict[str, float] = {}
+    n: dict[str, int] = {}
+    for r in readqc:
+        m = r.get("model") or ""
+        cost[m] = cost.get(m, 0.0) + float(r.get("cost_usd") or 0.0)
+        n[m] = n.get(m, 0) + 1
+    seconds: dict[str, float] = {}
+    if audit_path.exists():
+        pending_model: str | None = None
+        with audit_path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                e = json.loads(line)
+                if e.get("stage") != "readqc":
+                    continue
+                if e.get("event") == "stage_start":
+                    pending_model = (e.get("config") or {}).get("model")
+                elif e.get("event") == "stage_end" and pending_model:
+                    elapsed = float(
+                        (e.get("counters") or {}).get("elapsed_s") or 0.0
+                    )
+                    seconds[pending_model] = (
+                        seconds.get(pending_model, 0.0) + elapsed
+                    )
+                    pending_model = None
+    benchmark = _load_model_benchmark()
+    return {
+        m: ModelSpend(
+            n_photos=n.get(m, 0),
+            cost_usd=cost.get(m, 0.0),
+            seconds=seconds.get(m, 0.0),
+            accuracy_pct=benchmark.get(_model_short(m), {}).get("pct"),
+            accuracy_n_test=benchmark.get(_model_short(m), {}).get("n_test"),
+        )
+        for m in (SONNET_MODEL_ID, HAIKU_MODEL_ID)
+    }
+
+
+def _model_short(model_id: str) -> str:
+    if "haiku" in model_id:
+        return "haiku"
+    if "sonnet" in model_id:
+        return "sonnet"
+    return model_id
+
+
+def _load_model_benchmark() -> dict[str, dict]:
+    """Read per-model accuracy summary written by `src.audit_groundtruth`.
+
+    Returns {"sonnet": {"pct": 89.0, "n_test": 219}, "haiku": {...}}
+    (uses overall_strict). Returns {} if the file is missing — hero
+    will render '—' for accuracy in that case.
+
+    NOT cached: the JSON is tiny and an operator re-running the audit
+    script should see new numbers on the next Streamlit rerun, not on
+    process restart.
+    """
+    path = REAL_PROCESSED / "model_benchmark.json"
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out: dict[str, dict] = {}
+    for model, r in raw.items():
+        n_test = r.get("n_test") or 0
+        overall = r.get("overall_strict") or {}
+        # 0 test photos == no measurement, not "0% accuracy". Hero
+        # renders '—' for None and a real % otherwise.
+        out[model] = {
+            "pct": overall.get("pct") if n_test > 0 else None,
+            "n_test": n_test if n_test > 0 else None,
+        }
+    return out
+
+
 def compute_hero_stats(
     verdicts: pd.DataFrame,
     readqc: list[dict],
     forensics: list[dict],
     geomatch: pd.DataFrame,
+    audit_path: Path | None = None,
 ) -> HeroStats:
     n_segments = len(verdicts)
     counts = verdicts["verdict"].value_counts().to_dict()
     n_green = counts.get("GREEN", 0)
     n_yellow = counts.get("YELLOW", 0)
     n_red = counts.get("RED", 0)
+    # Split coverage (was anything photographed?) from quality (does the
+    # photographed work pass spec?). See hero.py docstring for why.
+    n_with_photos = int((verdicts["photo_count"] > 0).sum())
+    pct_coverage = (n_with_photos / n_segments * 100) if n_segments else 0.0
+    pct_quality = (n_green / n_with_photos * 100) if n_with_photos else 0.0
+    if audit_path is None:
+        audit_path = REAL_PROCESSED / "audit.jsonl"
+    spend = _spend_by_model(readqc, audit_path)
+    sonnet = spend[SONNET_MODEL_ID]
+    haiku = spend[HAIKU_MODEL_ID]
+    total_seconds = sonnet.seconds + haiku.seconds
     return HeroStats(
-        pct_compliant=(n_green / n_segments * 100) if n_segments else 0.0,
+        pct_coverage=pct_coverage,
+        pct_quality=pct_quality,
+        n_segments_with_photos=n_with_photos,
         n_green=n_green,
         n_yellow=n_yellow,
         n_red=n_red,
         n_segments=n_segments,
         n_photos_scored=len(readqc),
-        total_cost_usd=sum(r.get("cost_usd", 0.0) for r in readqc),
-        audit_minutes=28,
+        total_cost_usd=sonnet.cost_usd + haiku.cost_usd,
+        audit_minutes=int(total_seconds // 60),
+        sonnet=sonnet,
+        haiku=haiku,
         n_duplicate_photos=max(0, len(forensics) - sum(
             1 for r in forensics if r.get("is_phash_representative")
         )),
@@ -258,7 +360,7 @@ def main() -> None:
 
     if view == "upload":
         st.set_page_config(
-            page_title="APG photo-QC · Submit batch",
+            page_title="ÖGIG photo-QC · Submit batch",
             layout="wide",
             initial_sidebar_state="collapsed",
         )
@@ -271,7 +373,7 @@ def main() -> None:
 
     # ---- Reviewer dashboard ----
     st.set_page_config(
-        page_title="APG photo-QC · Reviewer dashboard",
+        page_title="ÖGIG photo-QC · Reviewer dashboard",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
@@ -423,7 +525,10 @@ def main() -> None:
         r["segment_id"]: r for r in verdicts.to_dict("records")
     }
 
-    stats = compute_hero_stats(verdicts, readqc, forensics, geomatch)
+    stats = compute_hero_stats(
+        verdicts, readqc, forensics, geomatch,
+        audit_path=paths.readqc_jsonl.parent / "audit.jsonl",
+    )
 
     # ---- Page assembly -------------------------------------------------
     if session_lot:
@@ -477,6 +582,9 @@ def main() -> None:
         trenches, fcps, cluster, verdicts_by_segment, photo_points,
         upload_points=upload_points,
         focus_bounds=focus_bounds,
+        coverage_gap_only=bool(
+            st.session_state.get("map_filter_coverage_gap", False)
+        ),
     )
     with map_col:
         click = st_folium(

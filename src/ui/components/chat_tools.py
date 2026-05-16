@@ -197,9 +197,10 @@ def dashboard_overview() -> dict[str, Any]:
     """Pipeline-wide stats from verdicts.csv.
 
     Prefers `data/processed/verdicts.csv` (live pipeline output); falls
-    back to `demo_fixtures/verdicts.csv`. Returns counts, %-compliant,
-    and the top 5 worst RED + top 5 YELLOW segments by length so the
-    model can answer "what's the worst?" in one round-trip.
+    back to `demo_fixtures/verdicts.csv`. Returns counts, coverage %
+    (segments documented), quality % (documented segments passing
+    spec), and the top 5 worst RED + top 5 YELLOW segments by length
+    so the model can answer "what's the worst?" in one round-trip.
 
     Wrapped in try/except: verdicts.csv schema has drifted in this repo
     before and we'd rather degrade than crash the chat. Any unexpected
@@ -238,12 +239,17 @@ def dashboard_overview() -> dict[str, Any]:
                 for r in rows.to_dict("records")
             ]
 
+        n_with_photos = int((df["photo_count"] > 0).sum())
         return {
             "status": "ok",
             "source": "live" if path == _LIVE_VERDICTS else "fixtures",
             "n_segments": n,
+            "n_segments_with_photos": n_with_photos,
             "verdict_counts": {"GREEN": n_green, "YELLOW": n_yellow, "RED": n_red},
-            "pct_compliant": round((n_green / n * 100) if n else 0.0, 1),
+            "pct_coverage": round((n_with_photos / n * 100) if n else 0.0, 1),
+            "pct_quality": round(
+                (n_green / n_with_photos * 100) if n_with_photos else 0.0, 1
+            ),
             "worst_red": _top("RED"),
             "worst_yellow": _top("YELLOW"),
         }
@@ -301,11 +307,12 @@ TOOLS: list[dict] = [
         "description": (
             "Pipeline-wide stats from the reviewer dashboard's verdicts "
             "table -- one row per trench segment. Returns total segment "
-            "count, GREEN/YELLOW/RED counts, % compliant, and the 5 "
-            "worst RED + 5 worst YELLOW segments by length (with their "
-            "reason strings). Use this when the user asks about overall "
-            "compliance, 'which segments are failing', or wants a "
-            "project-level picture rather than per-photo."
+            "count, GREEN/YELLOW/RED counts, coverage % (segments "
+            "documented), quality % (documented segments passing spec), "
+            "and the 5 worst RED + 5 worst YELLOW segments by length "
+            "(with their reason strings). Use this when the user asks "
+            "about overall compliance, 'which segments are failing', or "
+            "wants a project-level picture rather than per-photo."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },

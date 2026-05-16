@@ -1,6 +1,6 @@
 """Topbar — slim single row at the top.
 
-    APG · TRENCH QC    Project · Location              [• live data]
+    ÖGIG · TRENCH QC    Project · Location              [• live data]
 
 One row. Wraps on mobile. Bottom border separates it from the hero.
 """
@@ -91,7 +91,7 @@ def render(
     st.markdown(
         f"""
         <div class="topbar">
-          <span class="topbar-brand">APG · TRENCH QC</span>
+          <span class="topbar-brand">ÖGIG · TRENCH QC</span>
           <span class="topbar-project">
             <b>{project_name}</b>
             <span class="loc"> · {project_location}</span>

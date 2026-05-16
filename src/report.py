@@ -120,7 +120,8 @@ def write_deficiency_csv(verdicts: list[dict], out_path: Path) -> int:
     bad = [r for r in verdicts if (r.get("verdict") or "").upper() != "GREEN"]
     bad.sort(key=lambda r: (r.get("fcp_name", ""), -_length_key(r)))
     with out_path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=DEFICIENCY_FIELDS, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=DEFICIENCY_FIELDS,
+                           extrasaction="ignore")
         w.writeheader()
         for r in bad:
             w.writerow(r)
@@ -170,7 +171,8 @@ def write_personal_data_csv(
 ) -> int:
     """One row per photo flagged personal_data_visible='yes'."""
     rows = [
-        {"photo_id": r["photo_id"], "rel_path": manifest.get(r["photo_id"], "")}
+        {"photo_id": r["photo_id"],
+            "rel_path": manifest.get(r["photo_id"], "")}
         for r in readqc
         if r.get("personal_data_visible") == "yes"
     ]
@@ -186,7 +188,7 @@ SUMMARY_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>APG photo-QC — summary</title>
+<title>ÖGIG photo-QC — summary</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
          margin: 32px; color: #1e293b; }}
@@ -210,7 +212,7 @@ SUMMARY_HTML_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>APG photo-QC — summary</h1>
+<h1>ÖGIG photo-QC — summary</h1>
 <div class="source">Source: <code>{source}</code></div>
 
 <div class="grid">
@@ -233,6 +235,10 @@ SUMMARY_HTML_TEMPLATE = """<!DOCTYPE html>
   <div class="card">
     <div class="label">Run cost</div>
     <div class="value">${total_cost:.2f}</div>
+    <div style="font-size:12px;color:#64748b;margin-top:4px;">
+      Sonnet {n_sonnet:,} · ${cost_sonnet:.2f}<br>
+      Haiku {n_haiku:,} · ${cost_haiku:.2f}
+    </div>
   </div>
 </div>
 
@@ -269,7 +275,8 @@ def write_summary_html(
     out_path: Path,
 ) -> None:
     from collections import Counter
-    verdict_counts = Counter((r.get("verdict") or "").upper() for r in verdicts)
+    verdict_counts = Counter((r.get("verdict") or "").upper()
+                             for r in verdicts)
     n_dups = sum(
         1 for r in forensics
         if not r.get("is_phash_representative", True)
@@ -287,6 +294,16 @@ def write_summary_html(
         if (r.get("latlon_vs_address_flag") or "").lower() == "true"
     )
     total_cost = sum(float(r.get("cost_usd") or 0.0) for r in readqc)
+    n_sonnet = sum(1 for r in readqc if "sonnet" in (r.get("model") or "").lower())
+    n_haiku = sum(1 for r in readqc if "haiku" in (r.get("model") or "").lower())
+    cost_sonnet = sum(
+        float(r.get("cost_usd") or 0.0) for r in readqc
+        if "sonnet" in (r.get("model") or "").lower()
+    )
+    cost_haiku = sum(
+        float(r.get("cost_usd") or 0.0) for r in readqc
+        if "haiku" in (r.get("model") or "").lower()
+    )
 
     html = SUMMARY_HTML_TEMPLATE.format(
         source=source,
@@ -296,6 +313,10 @@ def write_summary_html(
         n_red=verdict_counts.get("RED", 0),
         n_photos_scored=len(readqc),
         total_cost=total_cost,
+        n_sonnet=n_sonnet,
+        n_haiku=n_haiku,
+        cost_sonnet=cost_sonnet,
+        cost_haiku=cost_haiku,
         n_dups=n_dups,
         n_geo_mismatch=n_geo_mismatch,
         n_personal_data=n_personal_data,
@@ -349,7 +370,8 @@ def main() -> int:
     prose_path = paths.REPORT_DIR / "cover_prose.json"
     prose_ok = write_cover_prose(verdicts, intake, prose_path)
     if prose_ok:
-        print(f"[report] cover prose written → {prose_path.relative_to(paths.REPO_ROOT)}")
+        print(
+            f"[report] cover prose written → {prose_path.relative_to(paths.REPO_ROOT)}")
     else:
         print("[report] cover prose skipped (no API key or call failed) — "
               "PDF will use templated prose")

@@ -123,6 +123,13 @@ def render(
         "<div class='section-head'>Jump to a typical catch</div>",
         unsafe_allow_html=True,
     )
+    # "Coverage gap" is special: it toggles a map-wide filter that
+    # hides every segment with photos, leaving only the un-documented
+    # gaps. The other two pills still jump to a single example segment.
+    coverage_filter_on = bool(
+        st.session_state.get("map_filter_coverage_gap", False)
+    )
+
     items = [
         ("red_gap",   "Coverage gap"),
         ("duplicate", "Duplicate"),
@@ -132,6 +139,26 @@ def render(
     for col, (key, label) in zip(cols, items):
         seg_id = picks.get(key)
         with col:
+            if key == "red_gap":
+                # Filter toggle: button label flips to "Show all" when
+                # the filter is active. Never disabled — the filter
+                # mode is always meaningful even if no RED segment
+                # qualifies as a single-pick "example."
+                btn_label = "Show all" if coverage_filter_on else label
+                clicked = st.button(
+                    btn_label,
+                    key=f"tour_{key}",
+                    use_container_width=True,
+                )
+                if clicked:
+                    st.session_state["map_filter_coverage_gap"] = (
+                        not coverage_filter_on
+                    )
+                    # Drop any open segment selection so the filtered
+                    # map doesn't keep an out-of-view panel pinned open.
+                    st.session_state.pop("selected_segment", None)
+                    st.rerun()
+                continue
             clicked = st.button(
                 label,
                 key=f"tour_{key}",

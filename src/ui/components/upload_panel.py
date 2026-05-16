@@ -38,6 +38,7 @@ from src.ui.components.live_geomatch import (
     snap_to_segment,
 )
 from src.ui.components.live_score import (
+    DEFAULT_LIVE_MODEL_KEY,
     score_uploaded_photo,
     verdict_for_photo,
 )
@@ -67,8 +68,34 @@ CSS = """
     color: var(--c-muted);
 }
 
-/* Style the rail's file uploader. The `key="card_rail_upload"` lands on
-   the st.container(border=True) so we can scope to it. */
+/* Tiny "Step N · Title" eyebrow above each uploader card. */
+.upload-rail-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 4px 0;
+    font-size: 11.5px;
+}
+.upload-rail-step .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--c-accent);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+}
+.upload-rail-step .step-title {
+    font-weight: 600;
+    color: var(--c-text);
+}
+
+/* Style both rail uploader cards. Each container's `key=` lands on the
+   st.container(border=True) so we can scope per-card. */
+.st-key-card_rail_lot_upload,
 .st-key-card_rail_upload {
     background: var(--c-surface) !important;
     border-radius: var(--r-md) !important;
@@ -77,6 +104,7 @@ CSS = """
     padding: 12px !important;
     margin-bottom: var(--s-3) !important;
 }
+.st-key-card_rail_lot_upload [data-testid="stFileUploader"] section,
 .st-key-card_rail_upload [data-testid="stFileUploader"] section {
     border: 2px dashed var(--c-border) !important;
     border-radius: var(--r-sm) !important;
@@ -85,10 +113,12 @@ CSS = """
     min-height: 70px !important;
     transition: border-color 120ms ease, background 120ms ease;
 }
+.st-key-card_rail_lot_upload [data-testid="stFileUploader"] section:hover,
 .st-key-card_rail_upload [data-testid="stFileUploader"] section:hover {
     border-color: var(--c-accent) !important;
     background: var(--c-accent-soft) !important;
 }
+.st-key-card_rail_lot_upload [data-testid="stFileUploaderDropzoneInstructions"],
 .st-key-card_rail_upload [data-testid="stFileUploaderDropzoneInstructions"] {
     font-size: 11.5px !important;
 }
@@ -303,6 +333,39 @@ CSS = """
 """
 
 
+_MODEL_LABELS = {
+    "sonnet": "Precise",
+    "haiku":  "Fast",
+}
+
+
+def _render_model_toggle(*, key: str) -> None:
+    """Render a 2-position model toggle.
+
+    Writes the selected key (`"sonnet"` or `"haiku"`) into
+    `st.session_state["live_model_key"]` so the scoring loop can read it.
+    Defaults to Sonnet on first render — Sonnet is the demo's precise
+    path; Haiku is the cheap fallback.
+    """
+    current = st.session_state.get("live_model_key", DEFAULT_LIVE_MODEL_KEY)
+    label_to_key = {v: k for k, v in _MODEL_LABELS.items()}
+    labels = list(_MODEL_LABELS.values())
+    default_idx = labels.index(_MODEL_LABELS[current])
+    pick = st.radio(
+        "Analysis model",
+        options=labels,
+        index=default_idx,
+        horizontal=True,
+        key=key,
+        help=(
+            "Sonnet: higher accuracy, slower, ~3× cost per photo. "
+            "Haiku: cheaper and faster, somewhat lower accuracy on "
+            "ambiguous frames."
+        ),
+    )
+    st.session_state["live_model_key"] = label_to_key[pick]
+
+
 def _ensure_state() -> list[dict]:
     return st.session_state.setdefault("dashboard_uploads", [])
 
@@ -334,6 +397,60 @@ def _summary_bar_html(uploads: list[dict]) -> str:
         f"<div class='rail-summary'>{''.join(parts)}"
         f"<div class='spend'>Spend <b>${spend:.4f}</b></div></div>"
     )
+
+
+def _process_lot_upload(uploaded_file: Any) -> None:
+    """Handle Step 1's uploader: a single APG lot zip.
+
+    Accepts the as-shipped APG zip (the one that contains the three
+    `*_geojson.zip` files or the raw geojsons). Extracts the geojsons to
+    a temp dir via [[lot_bundle.extract_lot_bundle]] and sets
+    `session_lot` -- same shape the bundle-fallback path in
+    `_process_pending` writes -- then reruns so app.py rebuilds
+    `geom_handle` against the new lot before any photos try to snap.
+
+    Photos that happen to be inside the lot zip are ignored here on
+    purpose: this slot is "lot data only". Drop bundles (lot + photos
+    together) in the photo uploader instead.
+    """
+    if uploaded_file is None:
+        return
+    bundle_cache: dict[str, lot_bundle.LotBundle] = (
+        st.session_state.setdefault("_extracted_lot_cache", {})
+    )
+    name = uploaded_file.name
+    raw = uploaded_file.getvalue()
+    if not lot_bundle.is_lot_bundle(name, raw):
+        st.error(
+            f"{name} doesn't look like an APG lot zip "
+            "(no Trenches geojson found inside).",
+            icon="⚠️",
+        )
+        return
+    bundle = bundle_cache.get(name)
+    if bundle is None:
+        bundle = lot_bundle.extract_lot_bundle(name, raw)
+        if bundle is None:
+            st.error(
+                f"{name} looked valid but failed to extract.",
+                icon="⚠️",
+            )
+            return
+        bundle_cache[name] = bundle
+    new_session_lot = {
+        "lot_id": bundle.lot_id,
+        "trenches_path": str(bundle.trenches_path),
+        "fcps_path": str(bundle.fcps_path),
+        "cluster_path": str(bundle.cluster_path),
+        "source_name": name,
+    }
+    prior = st.session_state.get("session_lot")
+    prior_source = prior.get("source_name") if prior else None
+    if prior_source != new_session_lot["source_name"]:
+        st.session_state["session_lot"] = new_session_lot
+        st.session_state["dashboard_uploads"] = []
+        st.session_state["dashboard_score_cache"] = {}
+        st.rerun()
 
 
 def _process_pending(uploaded_files: list[Any]) -> None:
@@ -491,7 +608,8 @@ def _process_pending(uploaded_files: list[Any]) -> None:
             continue
         if key in cache:
             state.append(
-                _build_entry(display, payload, source, key, cache[key], geom_for_snap)
+                _build_entry(display, payload, source, key,
+                             cache[key], geom_for_snap)
             )
             continue
         pending.append((display, payload, source, key))
@@ -501,9 +619,12 @@ def _process_pending(uploaded_files: list[Any]) -> None:
 
     n = len(pending)
     progress = st.progress(0.0, text=f"Scoring 0 / {n} …")
+    model_key = st.session_state.get(
+        "live_model_key", DEFAULT_LIVE_MODEL_KEY
+    )
     for i, (display, payload, source, key) in enumerate(pending, 1):
         suffix = Path(display).suffix or ".jpg"
-        qc, cost, err = score_uploaded_photo(payload, suffix)
+        qc, cost, err = score_uploaded_photo(payload, suffix, model_key)
         cached = {"qc": qc, "cost": cost, "err": err}
         cache[key] = cached
         state.append(
@@ -586,9 +707,9 @@ def _render_delta_panel() -> None:
             before, after = label.split("→")
             pair_html.append(
                 f"<span class='pair'><b>{n}</b>"
-                f"<span class='swatch {_VERDICT_CSS.get(before,'')}'></span>"
+                f"<span class='swatch {_VERDICT_CSS.get(before, '')}'></span>"
                 f"<span class='arrow'>→</span>"
-                f"<span class='swatch {_VERDICT_CSS.get(after,'')}'></span>"
+                f"<span class='swatch {_VERDICT_CSS.get(after, '')}'></span>"
                 f"</span>"
             )
         body_html = "<div class='row'>" + " ".join(pair_html) + "</div>"
@@ -693,7 +814,7 @@ def render(geom_handle: dict | None) -> None:
 
     st.markdown(
         "<div class='upload-rail-head'>"
-        "<div class='title'>Drop photos</div>"
+        "<div class='title'>Load lot &amp; drop photos</div>"
         "<div class='hint'>scored live · map recolors</div>"
         "</div>",
         unsafe_allow_html=True,
@@ -708,7 +829,7 @@ def render(geom_handle: dict | None) -> None:
             st.markdown(
                 "<div class='loaded-lot-banner'>"
                 "<div class='banner-eyebrow'>Loaded lot</div>"
-                f"<div class='banner-id'>{session_lot.get('lot_id','uploaded-lot')}"
+                f"<div class='banner-id'>{session_lot.get('lot_id', 'uploaded-lot')}"
                 f"</div>"
                 f"<div class='banner-sub'>{n_uploads} {photo_word} scored "
                 f"against this lot &middot; map shows its trenches</div>"
@@ -728,8 +849,35 @@ def render(geom_handle: dict | None) -> None:
                 st.session_state.pop("dashboard_batch_upload", None)
                 st.rerun()
 
+    with st.container(border=True, key="card_rail_lot_upload"):
+        st.markdown(
+            "<div class='upload-rail-step'>"
+            "<span class='step-num'>1</span>"
+            "<span class='step-title'>Load APG lot</span>"
+            "</div>"
+            "<div class='upload-rail-help'>"
+            "The CLP&hellip;.zip APG ships with the three trench &amp; "
+            "polygon geojsons inside. Defines which segments your "
+            "photos snap to."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        lot_file = st.file_uploader(
+            "Drop the APG lot zip",
+            type=["zip"],
+            accept_multiple_files=False,
+            key="dashboard_lot_upload",
+            label_visibility="collapsed",
+        )
+        if lot_file is not None:
+            _process_lot_upload(lot_file)
+
     with st.container(border=True, key="card_rail_upload"):
         st.markdown(
+            "<div class='upload-rail-step'>"
+            "<span class='step-num'>2</span>"
+            "<span class='step-title'>Drop photos</span>"
+            "</div>"
             "<div class='upload-rail-help'>"
             "Photos (JPG / JPEG / PNG) or an archive "
             "(.zip / .tar / .tgz / .tar.gz / .tar.bz2). Each photo runs "
@@ -744,6 +892,10 @@ def render(geom_handle: dict | None) -> None:
                 "to score uploads.",
                 icon="⚠️",
             )
+        # Model toggle — operator picks cost/precision trade-off.
+        # Default = Sonnet (precise). Stored in session_state so the
+        # _process_pending loop picks it up on the next score.
+        _render_model_toggle(key="rail_model_toggle")
         uploaded_files = st.file_uploader(
             "Drop photos or an archive",
             type=["jpg", "jpeg", "png",

@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # --- Inputs (read-only, NDA-protected, gitignored under data/) ---
 DATA_DIR = REPO_ROOT / "data"
-PHOTOS_DIR = DATA_DIR / "Fotos" / "Fotos"
+PHOTOS_DIR = DATA_DIR / "Resources" / "all"
 EXEMPLARS_DIR = DATA_DIR / "Beispiele" / "Beispiele"
 GEO_DIR = DATA_DIR / "geo"
 TRENCHES_GEOJSON = GEO_DIR / "CLP20417A-P1-B00_Trenches.geojson"

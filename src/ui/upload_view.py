@@ -23,10 +23,12 @@ import streamlit as st
 
 from src.ui.components import archive_expand, topbar
 from src.ui.components.live_score import (
+    DEFAULT_LIVE_MODEL_KEY,
     render_result_card,
     score_uploaded_photo,
     verdict_for_photo,
 )
+from src.ui.components.upload_panel import _render_model_toggle
 
 
 # ---- Page-specific CSS --------------------------------------------------
@@ -454,6 +456,7 @@ def render() -> None:
         )
         if not api_ready:
             _render_no_api_key_warning()
+        _render_model_toggle(key="upload_view_model_toggle")
         uploaded_files = st.file_uploader(
             "Drag and drop or click to browse",
             type=["jpg", "jpeg", "png",
@@ -503,9 +506,12 @@ def render() -> None:
         if pending:
             n = len(pending)
             progress = st.progress(0.0, text=f"Scoring 0 / {n} …")
+            model_key = st.session_state.get(
+                "live_model_key", DEFAULT_LIVE_MODEL_KEY
+            )
             for i, (display, payload, key) in enumerate(pending, 1):
                 suffix = Path(display).suffix or ".jpg"
-                qc, cost, err = score_uploaded_photo(payload, suffix)
+                qc, cost, err = score_uploaded_photo(payload, suffix, model_key)
                 cache[key] = {
                     "qc": qc, "cost": cost, "err": err,
                     "image": payload, "name": display,

@@ -33,7 +33,8 @@ from src.ui.components.segment_panel import (
 )
 
 
-_LIVE_MODEL_KEY = "sonnet"  # claude-sonnet-4-6
+DEFAULT_LIVE_MODEL_KEY = "sonnet"  # claude-sonnet-4-6
+LIVE_MODEL_KEYS = ("sonnet", "haiku")  # toggle options in upload panels
 _EXEMPLARS_FALLBACK = Path(__file__).resolve().parents[3] / "Resources" / "examples"
 
 
@@ -92,10 +93,17 @@ def _anthropic_client():
 
 def score_uploaded_photo(
     file_bytes: bytes, suffix: str,
+    model_key: str = DEFAULT_LIVE_MODEL_KEY,
 ) -> tuple[Any, float, str | None]:
     """Run one Claude vision call on the uploaded bytes, with retries
-    on transient upstream errors."""
+    on transient upstream errors.
+
+    `model_key` is one of LIVE_MODEL_KEYS. Defaults to "sonnet" (precise);
+    "haiku" trades accuracy for ~3x lower cost and ~2x lower latency.
+    """
     from src.readqc import MODELS, _score_with_retry, cost_of
+    if model_key not in MODELS:
+        model_key = DEFAULT_LIVE_MODEL_KEY
     client = _anthropic_client()
     if client is None:
         return None, 0.0, (
@@ -107,13 +115,13 @@ def score_uploaded_photo(
         tmp_path = Path(tmp.name)
     try:
         result, usage, err = _score_with_retry(
-            client, MODELS[_LIVE_MODEL_KEY], prefix, tmp_path,
+            client, MODELS[model_key], prefix, tmp_path,
         )
     finally:
         tmp_path.unlink(missing_ok=True)
     if err:
         return None, 0.0, err
-    return result, cost_of(MODELS[_LIVE_MODEL_KEY], usage), None
+    return result, cost_of(MODELS[model_key], usage), None
 
 
 def verdict_for_photo(qc: Any) -> tuple[str, str]:

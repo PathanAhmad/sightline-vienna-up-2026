@@ -42,9 +42,15 @@ def build_map(
     photo_points: list[dict],
     upload_points: list[dict] | None = None,
     focus_bounds: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    coverage_gap_only: bool = False,
 ) -> folium.Map:
     """Build the folium map. Each trench feature carries its verdict in
     properties so the click handler can read it back without a roundtrip.
+
+    When `coverage_gap_only` is True, only segments with `photo_count == 0`
+    (no photo provided at all) are rendered. Photo dots and live uploads
+    are still drawn — they remain useful spatial context for "what
+    *was* documented vs. what wasn't."
     """
     feature_collection = {"type": "FeatureCollection", "features": []}
     for feat in trenches["features"]:
@@ -59,6 +65,17 @@ def build_map(
         )
         v_row = verdicts_by_segment.get(seg_id, {})
         verdict = v_row.get("verdict", "RED")
+        if coverage_gap_only:
+            # Coverage gap == segment that received no photo. A missing
+            # verdict row also counts as a gap (the pipeline only writes
+            # rows for known segments). Anything with photo_count > 0 is
+            # NOT a coverage gap, even if it failed QC.
+            try:
+                pc = int(v_row.get("photo_count") or 0)
+            except (TypeError, ValueError):
+                pc = 0
+            if pc > 0:
+                continue
         enriched = {
             **feat,
             "properties": {
