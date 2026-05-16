@@ -261,7 +261,7 @@ def _section_card(row: dict, address: str | None = None) -> Table:
     """
     verdict = str(row.get("verdict") or "").upper()
     seg_id = str(row.get("segment_id") or "")
-    short_id = seg_id.rsplit("_", 1)[-1] if "_" in seg_id else seg_id
+    short_id = _short_segment_id(seg_id)
     fcp = str(row.get("fcp_name") or "—")
 
     length_raw = row.get("length_m")
@@ -701,6 +701,20 @@ def _length_key(row: dict) -> float:
         return 0.0
 
 
+# Live pipeline segment IDs come in as "SDIRouteSection_<bigid>_<other>".
+# Stripping the long, repetitive prefix gives a stable, unique short form
+# the foreman can read. Demo fixture IDs ("S001") have no prefix and
+# pass through unchanged.
+_SHORT_ID_PREFIXES: tuple[str, ...] = ("SDIRouteSection_",)
+
+
+def _short_segment_id(seg_id: str) -> str:
+    for prefix in _SHORT_ID_PREFIXES:
+        if seg_id.startswith(prefix):
+            return seg_id[len(prefix):]
+    return seg_id
+
+
 def _segment_sort_key(row: dict) -> tuple[int, float]:
     """RED before YELLOW; longer sections first within a verdict.
 
@@ -709,6 +723,111 @@ def _segment_sort_key(row: dict) -> tuple[int, float]:
     verdict = str(row.get("verdict") or "").upper()
     rank = 0 if verdict == "RED" else 1
     return (rank, -_length_key(row))
+
+
+# Reasons that mean "no photos at all on this section". When most of a
+# project is in this state (early in a job), rendering one full card per
+# section produces a 100+ page PDF of identical content — and blocks the
+# Streamlit popover for ~10s while it builds. Collapse them into one
+# compact block per FCP instead, with a capped section-ID list.
+_BOILERPLATE_NO_PHOTO_REASONS: frozenset[str] = frozenset({
+    "no compliant photos snapped",
+    "no photos snapped to this segment",
+})
+
+# Cap the collapsed list so a project with 1,000+ untouched sections per
+# FCP still produces a usable PDF. The cover stats already show the full
+# count; the appendix below the cap reads "and N more".
+_NO_PHOTOS_LIST_CAP = 40
+
+
+def _is_no_photos_only(row: dict) -> bool:
+    reasons = str(row.get("reasons") or "").strip()
+    return reasons in _BOILERPLATE_NO_PHOTO_REASONS
+
+
+def _no_photos_block(
+    fcp: str,
+    rows: list[dict],
+    addresses: dict[str, str] | None,
+) -> Table:
+    """One compact card per FCP listing the sections that have no photos
+    at all. Single action line, then a capped per-section list."""
+    rows_sorted = sorted(rows, key=lambda r: str(r.get("segment_id") or ""))
+    total_length = sum(_length_key(r) for r in rows_sorted)
+
+    head = Paragraph(
+        f"<b>{len(rows_sorted)} sections with no photos submitted</b> "
+        f"<font color='#64748b'>· {total_length:.0f} m of trench, "
+        f"FCP {fcp}</font>",
+        S_CARD_REF,
+    )
+
+    do_next = Table(
+        [
+            [Paragraph("DO NEXT", S_REASON_HEAD)],
+            [Paragraph(
+                "Re-shoot 4–6 photos along each section below, one for "
+                "each work stage (open trench, sand bedding, cable "
+                "laid, warning tape).",
+                S_REASON,
+            )],
+        ],
+        colWidths=[CONTENT_W - 24],
+    )
+    do_next.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), C_REASON_BG),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("ROUNDEDCORNERS", [3, 3, 3, 3]),
+    ]))
+
+    list_items: list = []
+    for r in rows_sorted[:_NO_PHOTOS_LIST_CAP]:
+        seg_id = str(r.get("segment_id") or "")
+        short = _short_segment_id(seg_id)
+        length_m = _length_key(r)
+        addr = (addresses or {}).get(seg_id, "")
+        line = f"<b>{short}</b> · {length_m:.0f} m"
+        if addr:
+            line += f" &nbsp;·&nbsp; <font color='#64748b'>{addr}</font>"
+        list_items.append(Paragraph(line, S_LIST_DENSE))
+
+    if len(rows_sorted) > _NO_PHOTOS_LIST_CAP:
+        list_items.append(Paragraph(
+            f"<i>… and {len(rows_sorted) - _NO_PHOTOS_LIST_CAP} more "
+            "sections with no photos.</i>",
+            S_LIST_DENSE,
+        ))
+
+    list_table = Table([[item] for item in list_items], colWidths=[CONTENT_W - 24])
+    list_table.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    outer = Table(
+        [[head], [do_next], [list_table]],
+        colWidths=[CONTENT_W],
+    )
+    outer.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
+        ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+        ("BACKGROUND", (0, 0), (-1, -1), C_SURFACE),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (0, 0), 10),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 6),
+        ("TOPPADDING", (0, 1), (0, 1), 0),
+        ("BOTTOMPADDING", (0, 1), (0, 1), 8),
+        ("TOPPADDING", (0, 2), (0, 2), 0),
+        ("BOTTOMPADDING", (0, 2), (0, 2), 10),
+    ]))
+    return outer
 
 
 def _body_flowables(
@@ -730,25 +849,34 @@ def _body_flowables(
             ),
         ]
 
-    grouped: dict[str, list[dict]] = defaultdict(list)
+    grouped: dict[str, dict[str, list[dict]]] = defaultdict(
+        lambda: {"unique": [], "no_photos": []}
+    )
     for r in bad_rows:
-        grouped[str(r.get("fcp_name") or "—")].append(r)
+        fcp = str(r.get("fcp_name") or "—")
+        bucket = "no_photos" if _is_no_photos_only(r) else "unique"
+        grouped[fcp][bucket].append(r)
 
     out: list = [PageBreak(), Paragraph("Sections needing attention", S_H2)]
 
     for fcp in sorted(grouped):
-        rows = sorted(grouped[fcp], key=_segment_sort_key)
-        n = len(rows)
+        unique = sorted(grouped[fcp]["unique"], key=_segment_sort_key)
+        no_photos = grouped[fcp]["no_photos"]
+        n_total = len(unique) + len(no_photos)
         out.append(Paragraph(
-            f"FCP {fcp} &nbsp;·&nbsp; {n} section{'s' if n != 1 else ''} "
-            "flagged",
+            f"FCP {fcp} &nbsp;·&nbsp; {n_total} section"
+            f"{'s' if n_total != 1 else ''} flagged",
             S_FCP,
         ))
-        for r in rows:
+        for r in unique:
             seg_id = str(r.get("segment_id") or "")
             addr = (addresses or {}).get(seg_id)
             out.append(KeepTogether(
                 [_section_card(r, address=addr), Spacer(1, 3)]
+            ))
+        if no_photos:
+            out.append(KeepTogether(
+                [_no_photos_block(fcp, no_photos, addresses), Spacer(1, 8)]
             ))
     return out
 
@@ -793,8 +921,7 @@ def _appendix_flowables(verdicts: pd.DataFrame) -> list:
         by_fcp: dict[str, list[str]] = defaultdict(list)
         for r in passing:
             seg = str(r.get("segment_id") or "")
-            short = seg.rsplit("_", 1)[-1] if "_" in seg else seg
-            by_fcp[str(r.get("fcp_name") or "—")].append(short)
+            by_fcp[str(r.get("fcp_name") or "—")].append(_short_segment_id(seg))
         for fcp in sorted(by_fcp):
             ids = ", ".join(sorted(by_fcp[fcp]))
             out.append(Paragraph(
