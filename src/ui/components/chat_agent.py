@@ -16,6 +16,7 @@ Safety caps (defense-in-depth — see CLAUDE.md NDA + injection notes):
     string field, so a hostile photo note cannot fake a close-tag.
 """
 from __future__ import annotations
+from src.readqc import PRICING as _PRICING
 
 import json
 import os
@@ -33,7 +34,6 @@ MAX_SESSION_SPEND_USD = 0.50
 
 # Single source of truth for Haiku pricing -- imported from the scorer
 # module rather than duplicated here. PRICING is keyed by full model ID.
-from src.readqc import PRICING as _PRICING
 
 _PRICE_IN_PER_MTOK = _PRICING[_MODEL]["in"]
 _PRICE_OUT_PER_MTOK = _PRICING[_MODEL]["out"]

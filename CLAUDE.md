@@ -30,6 +30,7 @@ Open list. Add as we learn. Only things we **cannot** get wrong.
 - **Separate concerns by file/function.** Ingest, OCR, QC, geomatch, classify, report — each in its own function with a clear input/output. No 200-line do-everything scripts.
 - **Pipeline stages = named + human-logged.** Each stage prints what it did in plain English (`[geomatch] 47/52 matched, 5 unmatched → unmatched.json`). One-off scripts exempt.
 - **Research before coding unfamiliar tech.** Triggers: new library, version-sensitive API, CRS/EPSG, GeoJSON, Claude vision schema, OCR. Use context7 for library docs; web search otherwise. 30s of reading beats 2h of debugging.
+- **Skip flake8 for this project.** Don't run it, don't report violations, don't rewrap to satisfy E501. Long CSS blocks, regex tables, and natural-language LLM system prompts trip the 79-char rule constantly and rewrapping them just makes them harder to read on a deadline. This overrides the global "all Python must pass flake8" rule. mypy --strict still applies where it's not already noisy from missing stubs.
 
 ## Saturday checkpoints (non-negotiable)
 - **~17:00 tech checkpoint** — spine works end-to-end by then. Rough is fine.
