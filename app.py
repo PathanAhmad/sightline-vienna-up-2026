@@ -225,8 +225,10 @@ def main() -> None:
             initial_sidebar_state="collapsed",
         )
         inject_all_css()
+        from src.ui.components import chat
         from src.ui.upload_view import render as render_upload
         render_upload()
+        chat.render_fab()
         return
 
     # ---- Reviewer dashboard ----
@@ -311,6 +313,8 @@ def main() -> None:
         selected = None
         st.session_state.pop("selected_segment", None)
 
+    from src.ui.components import chat
+
     with rail_col:
         if selected is None:
             demo_tour.render(
@@ -318,7 +322,13 @@ def main() -> None:
             )
             worst_list.render(verdicts, limit=6)
             catches.render(stats)
-            download.render(verdicts)
+            # Download + Ask sit on one 50/50 row -- two primary actions
+            # framed as a pair instead of stacking the chat under the CTA.
+            cta_l, cta_r = st.columns(2, gap="small")
+            with cta_l:
+                download.render(verdicts)
+            with cta_r:
+                chat.render_inline()
         else:
             if st.button("← Back to overview",
                          key="back_to_rail",

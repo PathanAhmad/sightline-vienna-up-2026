@@ -29,6 +29,7 @@ import streamlit as st
 from . import base, layout, tokens
 from .components import (
     catches,
+    chat,
     demo_tour,
     download,
     hero,
@@ -58,6 +59,7 @@ def inject_all_css() -> None:
         catches.CSS,
         download.CSS,
         segment_panel.CSS,
+        chat.CSS,
     ]
     st.markdown("\n".join(chunks), unsafe_allow_html=True)
 
@@ -73,4 +75,5 @@ __all__ = [
     "catches",
     "download",
     "segment_panel",
+    "chat",
 ]

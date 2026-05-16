@@ -47,10 +47,10 @@ def render(verdicts: pd.DataFrame) -> None:
         verdicts[verdicts["verdict"] != "GREEN"][list(DEFICIENCY_FIELDS)]
         .sort_values(["fcp_name", "length_m"], ascending=[True, False])
     )
-    n_bad = len(bad)
-    plural = "s" if n_bad != 1 else ""
+    # Label kept short (no segment count) so it stays one line and
+    # matches the height of the adjacent "Ask QC bot" CTA.
     st.download_button(
-        f"Download deficiency report  ·  {n_bad} segment{plural}",
+        "Download deficiency report",
         data=bad.to_csv(index=False).encode("utf-8"),
         file_name="deficiency.csv",
         mime="text/csv",
