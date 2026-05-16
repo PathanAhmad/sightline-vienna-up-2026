@@ -29,7 +29,7 @@ import streamlit as st
 
 from src.ui.components.segment_panel import (
     PHOTO_CHECK_FIELDS,
-    _check_chip_html,
+    check_chip_html,
 )
 
 
@@ -175,7 +175,7 @@ def render_result_card(qc: Any, image_bytes: bytes, cost_usd: float) -> None:
     )
 
     chips = "".join(
-        _check_chip_html(label, getattr(qc, field, "?"))
+        check_chip_html(label, getattr(qc, field, "?"))
         for field, label in PHOTO_CHECK_FIELDS
     )
     st.markdown(

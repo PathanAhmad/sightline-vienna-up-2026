@@ -301,9 +301,7 @@ section[data-testid="stSidebar"] { display: none !important; }
 
 
 def _card_head(num_label: str, title: str, hint: str) -> None:
-    """Numbered card header. Streamlit-rendered as a markdown block at
-    the top of an `st.container(border=True)` so it visually anchors
-    the card."""
+    """Numbered card header rendered at the top of each upload card."""
     st.markdown(
         f"<div class='upload-card-head'>"
         f"<div><div class='num'>{num_label}</div>"

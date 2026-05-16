@@ -183,7 +183,7 @@ def _resolve_qc(
     return {}, None
 
 
-def _check_chip_html(field_label: str, value: str) -> str:
+def check_chip_html(field_label: str, value: str) -> str:
     val_class = {
         "yes": "yes", "no": "no",
         "occluded": "occluded", "not_applicable": "na",
@@ -345,7 +345,7 @@ def render(
                             unsafe_allow_html=True,
                         )
                     chips = "".join(
-                        _check_chip_html(label, qc.get(field, "?"))
+                        check_chip_html(label, qc.get(field, "?"))
                         for field, label in PHOTO_CHECK_FIELDS
                     )
                     st.markdown(
