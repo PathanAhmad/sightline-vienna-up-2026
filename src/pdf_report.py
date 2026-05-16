@@ -71,9 +71,17 @@ from src.humanize import VERDICT_LABEL, humanize_reason, humanize_reasons
 
 # ---- Pipeline constants (mirrored, not imported, to keep this
 #      module standalone-safe when src.classify can't be imported on a
-#      bare PDF render). Update both sites if either changes. -----------
+#      bare PDF render). -------------------------------------------------
+#
+# TODO: keep these in sync with src/classify.py — GREEN_MAX_GAP_M,
+#       RED_MIN_DENSITY_PER_M, MAX_SNAP_DISTANCE_M. The pipeline is the
+#       source of truth; this module only quotes the values back to the
+#       reader. _PHASE_DISPLAY below similarly mirrors classify.PHASE_CHECKS.
+#       The fallback model name is overridden at render time by the actual
+#       "model" field on readqc rows when available (see _run_details_box),
+#       so this only kicks in when the PDF is built without per-photo data.
 
-_MODEL_NAME = "claude-sonnet-4-6"
+_MODEL_NAME = "claude-sonnet-4-6"  # fallback only — see TODO above
 _RULE_MAX_GAP_M = 5.0      # GREEN: max gap between compliant photos
 _RULE_MIN_DENSITY_PER_M = 1.0 / 10.0  # RED: below this density
 _RULE_SNAP_DISTANCE_M = 75.0  # photo farther than this from any trench
@@ -214,6 +222,33 @@ S_RUN_DETAIL_VALUE = ParagraphStyle(
     "RunDetailValue", fontName=_FONT_BOLD, fontSize=11, leading=14,
     textColor=C_TEXT,
 )
+
+
+def _appendix_table_style(
+    n_rows: int,
+    valign: str = "TOP",
+    padding_x: int = 5,
+    padding_y: int = 4,
+    inner_line: float = 0.25,
+) -> TableStyle:
+    """Standard appendix-table style: light-grey header band, full box
+    border, hairline rule between body rows. Every audit appendix
+    table uses this, so a tweak (e.g., row spacing) edits one place
+    instead of eight. Defaults match the most common caller; the
+    route-summary and methodology tables override valign/inner_line."""
+    style: list[tuple] = [
+        ("VALIGN", (0, 0), (-1, -1), valign),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
+        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
+        ("LEFTPADDING", (0, 0), (-1, -1), padding_x),
+        ("RIGHTPADDING", (0, 0), (-1, -1), padding_x),
+        ("TOPPADDING", (0, 0), (-1, -1), padding_y),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), padding_y),
+    ]
+    for i in range(1, n_rows - 1):
+        style.append(("LINEBELOW", (0, i), (-1, i), inner_line, C_BORDER))
+    return TableStyle(style)
 
 
 # ---- Header / footer ----------------------------------------------------
@@ -660,6 +695,7 @@ def _cover_flowables(
     source: str,
     generated_on: str,
     intake: PhotoIntake | None,
+    idx: _PhotoIndex | None = None,
 ) -> list:
     counts = Counter(
         str(v).upper() for v in verdicts.get("verdict", pd.Series(dtype=str))
@@ -739,7 +775,7 @@ def _cover_flowables(
         S_BODY_MUTED,
     ))
     out.append(Spacer(1, 4))
-    out.append(_run_details_box(verdicts, source, generated_on, intake))
+    out.append(_run_details_box(verdicts, source, generated_on, intake, idx))
 
     if intake is not None:
         out.append(Spacer(1, 14))
@@ -1266,11 +1302,14 @@ def _short_photo_id(photo_id: str, limit: int = 38) -> str:
     return f"{head}…{tail}"
 
 
-# Maps each phase to the human label + per-check fields that matter for
-# evidence display. "scorable" relevance + correct phase + all listed
-# checks "yes" = compliant. Mirrors src/classify.PHASE_CHECKS but is
-# duplicated here to keep this module free of cross-stage imports.
-_PHASE_DISPLAY: dict[str, tuple[str, tuple[str, ...]]] = {
+# Maps each phase to (human label, required-checks tuple). A `None`
+# required-checks tuple means "this phase does not count as trench
+# evidence" — mirroring `src/classify.PHASE_CHECKS[phase] is None` for
+# paper_label / staging / other, where the photo documents something
+# real (a label, a staging area) but is not evidence FOR the section.
+# Duplicated here on purpose so this module stays standalone-safe; the
+# values must stay in sync with src/classify.PHASE_CHECKS.
+_PHASE_DISPLAY: dict[str, tuple[str, tuple[str, ...] | None]] = {
     "excavation":   ("excavation",       ("side_view_present",)),
     "depth_measure": ("depth-measuring",
                      ("depth_reference_visible", "side_view_present")),
@@ -1280,9 +1319,9 @@ _PHASE_DISPLAY: dict[str, tuple[str, tuple[str, ...]]] = {
     "tape_laid":    ("tape-laying",      ("warning_tape_visible",)),
     "backfilled":   ("back-filled",      ()),
     "restored":     ("restored",         ()),
-    "paper_label":  ("paper-label",      ()),
-    "staging":      ("staging",          ()),
-    "other":        ("other",            ()),
+    "paper_label":  ("paper-label",      None),
+    "staging":      ("staging",          None),
+    "other":        ("other",            None),
 }
 
 # Plain-English labels for every yes/no check we surface. Keep short —
@@ -1371,12 +1410,20 @@ def _photo_compliance_status(
         "is_phash_representative", True
     ):
         return ("inherited — duplicate", "#ca8a04")
-    # Phase-required checks failing?
     phase = qc.get("phase")
-    display = _PHASE_DISPLAY.get(phase or "", (None, ()))
-    if display[0] is None:
-        return (f"excluded — {phase or 'unknown phase'}", "#dc2626")
-    required = display[1]
+    display = _PHASE_DISPLAY.get(phase or "")
+    if display is None:
+        # Phase the model emitted is not one we know about. Surface the
+        # raw value so a reviewer notices, rather than silently passing.
+        return (f"excluded — unknown phase ({phase})", "#dc2626")
+    phase_label, required = display
+    if required is None:
+        # paper_label / staging / other — photo is real but not trench
+        # evidence. Must match the "no" rows in the methodology table.
+        return (
+            f"excluded — {phase_label} (not trench evidence)",
+            "#dc2626",
+        )
     for field in required:
         if qc.get(field) != "yes":
             return (
@@ -1515,6 +1562,7 @@ def _run_details_box(
     source: str,
     generated_on: str,
     intake: PhotoIntake | None,
+    idx: _PhotoIndex | None,
 ) -> Table:
     """Compact two-column key/value table that names the model, the
     cost, the run source, and the trench / threshold totals. This is
@@ -1544,9 +1592,24 @@ def _run_details_box(
         f"{intake.n_uploaded:,}" if intake is not None else "—"
     )
 
+    # Prefer the actual model name carried on the readqc rows so that
+    # a model swap in src/readqc.py shows up here automatically. Falls
+    # back to _MODEL_NAME when readqc is absent (minimal back-compat
+    # call) or when the rows don't carry a "model" field.
+    model_name = _MODEL_NAME
+    if idx is not None and idx.readqc_by_photo:
+        seen = Counter(
+            (qc.get("model") or "").strip()
+            for qc in idx.readqc_by_photo.values()
+            if (qc.get("model") or "").strip()
+        )
+        if seen:
+            top, _ = seen.most_common(1)[0]
+            model_name = top
+
     rows: list[list] = [
         [Paragraph("AI model", S_RUN_DETAIL_LABEL),
-         Paragraph(_MODEL_NAME, S_RUN_DETAIL_VALUE)],
+         Paragraph(model_name, S_RUN_DETAIL_VALUE)],
         [Paragraph("Run source", S_RUN_DETAIL_LABEL),
          Paragraph(
              "Live pipeline run" if source == "live" else "Demo dataset",
@@ -1695,19 +1758,9 @@ def _appendix_route_summary(
         20 * mm, 18 * mm, 28 * mm, 30 * mm, 40 * mm,
         CONTENT_W - 20 * mm - 18 * mm - 28 * mm - 30 * mm - 40 * mm,
     ])
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.3, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(
+        len(rows), valign="MIDDLE", padding_x=6, inner_line=0.3,
+    ))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -1785,19 +1838,9 @@ def _appendix_photo_audit_log(idx: _PhotoIndex) -> list:
         50 * mm, 22 * mm, 22 * mm, 36 * mm, 32 * mm,
         CONTENT_W - 50 * mm - 22 * mm - 22 * mm - 36 * mm - 32 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(
+        len(rows), padding_x=4, padding_y=3,
+    ))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -1862,19 +1905,7 @@ def _appendix_duplicate_clusters(idx: _PhotoIndex) -> list:
     t = Table(rows, colWidths=[
         18 * mm, 50 * mm, 60 * mm, CONTENT_W - 18 * mm - 50 * mm - 60 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(len(rows)))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -1912,7 +1943,8 @@ def _appendix_gps_mismatches(idx: _PhotoIndex) -> list:
         Paragraph("<b>Note</b>", S_TABLE_HEAD),
     ]
     rows: list[list] = [header]
-    for pid, g in sorted(flagged):
+    # Sort by photo_id only; see _appendix_not_classified for why.
+    for pid, g in sorted(flagged, key=lambda x: x[0]):
         qc = idx.readqc_by_photo.get(pid)
         addr = (qc or {}).get("overlay_address") or "—"
         latlon = (qc or {}).get("overlay_latlon") or "—"
@@ -1939,19 +1971,7 @@ def _appendix_gps_mismatches(idx: _PhotoIndex) -> list:
         45 * mm, 22 * mm, 35 * mm, 32 * mm, 18 * mm,
         CONTENT_W - 45 * mm - 22 * mm - 35 * mm - 32 * mm - 18 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(len(rows)))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -2006,19 +2026,7 @@ def _appendix_personal_data(idx: _PhotoIndex) -> list:
         60 * mm, 22 * mm, 28 * mm,
         CONTENT_W - 60 * mm - 22 * mm - 28 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(len(rows)))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -2027,9 +2035,15 @@ def _appendix_personal_data(idx: _PhotoIndex) -> list:
 def _appendix_not_classified(idx: _PhotoIndex) -> list:
     """Photos the relevance filter dropped before scoring."""
     out: list = []
+    # Sort by photo_id only — Python's tuple comparison would fall
+    # through to `dict < dict` if two photo IDs were ever equal, which
+    # would raise TypeError. They can't be equal today (dict keys are
+    # unique), but the explicit key keeps a future duplicate-row bug
+    # from blowing up the PDF render.
     flagged = sorted(
-        (pid, qc) for pid, qc in idx.readqc_by_photo.items()
-        if (qc.get("relevance") or "scorable") != "scorable"
+        ((pid, qc) for pid, qc in idx.readqc_by_photo.items()
+         if (qc.get("relevance") or "scorable") != "scorable"),
+        key=lambda x: x[0],
     )
     if not flagged:
         return out
@@ -2067,19 +2081,7 @@ def _appendix_not_classified(idx: _PhotoIndex) -> list:
         60 * mm, 28 * mm, 28 * mm,
         CONTENT_W - 60 * mm - 28 * mm - 28 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(len(rows)))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -2090,9 +2092,11 @@ def _appendix_ela(idx: _PhotoIndex) -> list:
     a likely re-save / re-compression, not proof of edit. Surfaced so
     a reviewer can take a second look."""
     out: list = []
+    # Sort by photo_id only; see _appendix_not_classified for why.
     flagged = sorted(
-        (pid, fo) for pid, fo in idx.forensics_by_photo.items()
-        if fo.get("ela_flag")
+        ((pid, fo) for pid, fo in idx.forensics_by_photo.items()
+         if fo.get("ela_flag")),
+        key=lambda x: x[0],
     )
     if not flagged:
         return out
@@ -2139,19 +2143,7 @@ def _appendix_ela(idx: _PhotoIndex) -> list:
         60 * mm, 22 * mm, 22 * mm,
         CONTENT_W - 60 * mm - 22 * mm - 22 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(len(rows)))
     out.append(t)
     out.append(Spacer(1, 12))
     return out
@@ -2238,19 +2230,9 @@ def _appendix_methodology() -> list:
     t = Table(rows, colWidths=[
         32 * mm, 90 * mm, CONTENT_W - 32 * mm - 90 * mm,
     ], repeatRows=1)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.6, C_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ] + [
-        ("LINEBELOW", (0, i), (-1, i), 0.25, C_BORDER)
-        for i in range(1, len(rows) - 1)
-    ]))
+    t.setStyle(_appendix_table_style(
+        len(rows), padding_x=6, padding_y=3,
+    ))
     out.append(t)
     out.append(Spacer(1, 10))
 
@@ -2353,7 +2335,7 @@ def build_pdf(
 
     story: list = []
     story.extend(_cover_flowables(
-        verdicts, source, generated_on, intake,
+        verdicts, source, generated_on, intake, idx,
     ))
     story.extend(_body_flowables(verdicts, segment_addresses, idx))
     story.extend(_appendix_flowables(verdicts, source, generated_on,
