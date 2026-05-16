@@ -227,10 +227,10 @@ def slide_pipeline(p):
     steps = [
         ("1", "Ingest",      "~3,929 photos +\nGeoJSON route file\nloaded into pipeline"),
         ("2", "Geo-Match",   "GPS overlay text\nmatched to trench\nsegment at 5 m res."),
-        ("3", "AI Review",   "8 compliance checks\nper photo via\nClaude vision model"),
+        ("3", "AI Review",   "6 compliance checks\nper photo via\nAI vision model"),
         ("4", "Classify",    "Each segment scored:\nGREEN / YELLOW / RED\nbased on check results"),
         ("5", "Map",         "Interactive color\nmap rendered in\nbrowser — click any seg."),
-        ("6", "Audit Report","CSV + HTML report\ndownloaded; full\nper-meter log exported"),
+        ("6", "Audit Report","CSV + PDF report\ndownloaded; full\nper-meter log exported"),
     ]
 
     box_w  = Inches(1.9)
@@ -259,9 +259,9 @@ def slide_pipeline(p):
             txb(s, ax, Inches(3.1), Inches(0.2), Inches(0.4),
                 "→", size=18, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
 
-    # 8 checks footnote
-    checks = ("8 checks: warning tape · sand bedding · side-view angle · depth reference · "
-              "sealed cable ends · GDPR (faces/plates) · duplicate detection · GPS↔address match")
+    # 6 checks footnote
+    checks = ("6 checks: warning tape · sand bedding · side-view angle · depth reference · "
+              "sealed cable ends · GDPR (faces/plates)")
     txb(s, Inches(0.5), Inches(5.55), Inches(12.3), Inches(0.45),
         checks, size=10, color=MID_GREY, italic=True)
 
@@ -272,57 +272,6 @@ def slide_pipeline(p):
         size=16, bold=True, color=ACCENT2, align=PP_ALIGN.CENTER)
 
 
-# ── SLIDE 6 — Architecture ──────────────────────────────────────────────────
-def slide_arch(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=ACCENT)
-    section_label(s, "Architecture")
-
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "Two Screens. One Pipeline. Zero Data Retained.",
-        size=32, bold=True, color=WHITE)
-
-    # Left tier — Operator
-    card(s, Inches(0.4), Inches(1.5), Inches(5.5), Inches(5.3), RGBColor(0x0C, 0x2A, 0x1A))
-    txb(s, Inches(0.5), Inches(1.6), Inches(5.3), Inches(0.5),
-        "OPERATOR SCREEN  (on-site)", size=13, bold=True, color=ACCENT2)
-    op_steps = [
-        "Upload photos from site tablet",
-        "Instant per-photo feedback",
-        "\"Missing sand photo — retake now\"",
-        "Catches gaps while trench is open",
-    ]
-    for j, line in enumerate(op_steps):
-        txb(s, Inches(0.6), Inches(2.15) + j * Inches(0.75), Inches(5.1), Inches(0.65),
-            f"• {line}", size=16, color=WHITE)
-
-    # Right tier — Reviewer
-    card(s, Inches(7.1), Inches(1.5), Inches(5.8), Inches(5.3), RGBColor(0x0C, 0x1A, 0x2E))
-    txb(s, Inches(7.2), Inches(1.6), Inches(5.6), Inches(0.5),
-        "REVIEWER DASHBOARD  (APG office)", size=13, bold=True, color=ACCENT)
-    rev_steps = [
-        "AI runs once at upload — results stored, zero re-processing per session",
-        "Color map: click any red segment",
-        "View evidence photos + check results",
-        "Download audit CSV / HTML report",
-    ]
-    for j, line in enumerate(rev_steps):
-        txb(s, Inches(7.3), Inches(2.15) + j * Inches(0.75), Inches(5.4), Inches(0.65),
-            f"• {line}", size=16, color=WHITE)
-
-    # Centre connector
-    txb(s, Inches(5.95), Inches(3.1), Inches(1.2), Inches(0.6),
-        "⟷", size=30, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
-    txb(s, Inches(5.75), Inches(3.75), Inches(1.6), Inches(0.55),
-        "One platform\ntwo entry points", size=10, color=LIGHT_GREY, align=PP_ALIGN.CENTER)
-
-    # Data-flow note
-    card(s, Inches(0.4), Inches(6.85), Inches(12.5), Inches(0.5), RGBColor(0x1A, 0x1A, 0x1A))
-    txb(s, Inches(0.6), Inches(6.88), Inches(12.2), Inches(0.45),
-        "Data flow: photos processed transiently in customer cloud  ·  AI model called via API — no photo stored  ·  Results written to customer-owned DB only",
-        size=11, color=LIGHT_GREY, italic=True)
-
 
 # ── SLIDE 7 — Compliance & GDPR ──────────────────────────────────────────────
 def slide_compliance(p):
@@ -332,7 +281,7 @@ def slide_compliance(p):
     section_label(s, "Compliance & GDPR")
 
     txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "Regulatory Compliance Baked In — Not Bolted On",
+        "Compliance Report: What APG Receives",
         size=32, bold=True, color=WHITE)
 
     items = [
@@ -382,7 +331,7 @@ def slide_value(p):
 
     txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
         "The Numbers Speak for Themselves",
-        size=32, bold=True, color=WHITE)
+        size=29, bold=True, color=WHITE)
 
     xyz = [
         ("€2.4M+",   "5-year liability exposure eliminated",
@@ -392,7 +341,7 @@ def slide_value(p):
         ("100%",     "segment coverage",
          "zero trench meters go unreviewed\n(photo-per-5 m rule across all 2,983 segments)"),
         ("100%",     "audit transparency",
-         "every check logged per photo · per meter · per timestamp\n(exportable CSV/HTML, court-admissible)"),
+         "every check logged per photo · per meter · per timestamp\n(exportable CSV/PDF, court-admissible)"),
         ("0%",       "hidden GDPR risk",
          "faces & plates flagged and withheld before any reviewer sees them\n(NIS2/GDPR checks run on 100% of photos)"),
     ]
@@ -414,7 +363,7 @@ def slide_value(p):
     card(s, Inches(0.4), Inches(6.65), Inches(12.5), Inches(0.65),
          RGBColor(0x00, 0x3A, 0x20))
     txb(s, Inches(0.6), Inches(6.7), Inches(12.2), Inches(0.55),
-        "$15 in AI cost  ·  28 minutes end-to-end  ·  3,929 photos  ·  2,983 segments scored  ·  ~600 duplicates caught",
+        "28 minutes end-to-end  ·  3,929 photos  ·  2,983 segments scored  ·  ~600 duplicates caught",
         size=14, bold=True, color=ACCENT2, align=PP_ALIGN.CENTER)
 
 
@@ -493,7 +442,6 @@ if __name__ == "__main__":
     slide_cost(deck)
     slide_solution(deck)
     slide_pipeline(deck)
-    slide_arch(deck)
     slide_compliance(deck)
     slide_value(deck)
     slide_cta(deck)
