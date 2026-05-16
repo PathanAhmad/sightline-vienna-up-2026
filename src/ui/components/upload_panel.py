@@ -608,11 +608,19 @@ def _render_delta_panel() -> None:
         unsafe_allow_html=True,
     )
 
+    # Disable when there's nothing to fly to -- the focus bbox is built
+    # from upload coords, and uploads without parseable GPS contribute
+    # nothing. Better a greyed-out button than a click that silently
+    # does nothing.
+    has_focusable = any(
+        u.get("lat") is not None and u.get("lon") is not None
+        for u in st.session_state.get("dashboard_uploads", [])
+    )
     if st.button(
         "Fly to changes",
         key="rail_fly_btn",
         use_container_width=True,
-        disabled=not bool(changed) and not has_uploads,
+        disabled=not has_focusable,
         help="Pan and zoom the map to fit your batch's footprint.",
     ):
         st.session_state["_fly_to_uploads"] = True
