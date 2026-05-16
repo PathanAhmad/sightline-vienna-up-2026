@@ -11,6 +11,8 @@ with two options:
 """
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import streamlit as st
 
@@ -97,6 +99,9 @@ def _build_pdf_cached(
     source: str,
     intake: PhotoIntake | None,
     segment_addresses_items: tuple[tuple[str, str], ...] | None,
+    readqc_payload: str | None,
+    forensics_payload: str | None,
+    geomatch_payload: str | None,
 ) -> bytes:
     """st.download_button needs bytes at render time, and the popover
     body evaluates on every rerun whether it's open or not. Cache so the
@@ -104,17 +109,31 @@ def _build_pdf_cached(
 
     `segment_addresses_items` is the dict flattened into sorted tuples
     so it hashes cleanly as a cache key (raw dicts aren't hashable).
+
+    `readqc_payload` / `forensics_payload` / `geomatch_payload` are
+    JSON strings so they hash cleanly. We parse back to lists of dicts
+    inside the cached call. Each is independently optional — if any one
+    of the three is missing, the PDF skips the audit-trail appendices
+    that need them.
     """
     addresses = (
         dict(segment_addresses_items)
         if segment_addresses_items is not None
         else None
     )
+    readqc = json.loads(readqc_payload) if readqc_payload else None
+    forensics = json.loads(forensics_payload) if forensics_payload else None
+    geomatch_recs = (
+        json.loads(geomatch_payload) if geomatch_payload else None
+    )
     return build_pdf(
         verdicts,
         source=source,
         intake=intake,
         segment_addresses=addresses,
+        readqc=readqc,
+        forensics=forensics,
+        geomatch=geomatch_recs,
     )
 
 
@@ -138,11 +157,25 @@ def render(
     source = "live" if paths.VERDICTS_CSV.exists() else "fixtures"
     intake = None
     address_items: tuple[tuple[str, str], ...] | None = None
+    readqc_payload: str | None = None
+    forensics_payload: str | None = None
+    geomatch_payload: str | None = None
     if readqc is not None and forensics is not None and geomatch is not None:
         geo_records = geomatch.to_dict("records")
         intake = compute_photo_intake(readqc, forensics, geo_records)
         addresses = compute_segment_addresses(geo_records, readqc)
         address_items = tuple(sorted(addresses.items()))
+        # JSON-encode for the cache key. Sort keys so identical payloads
+        # hash identically across reruns.
+        readqc_payload = json.dumps(
+            readqc, sort_keys=True, default=str,
+        )
+        forensics_payload = json.dumps(
+            forensics, sort_keys=True, default=str,
+        )
+        geomatch_payload = json.dumps(
+            geo_records, sort_keys=True, default=str,
+        )
 
     with st.popover(
         "Download deficiency report",
@@ -170,7 +203,10 @@ def render(
         )
         st.download_button(
             "Field report (PDF)",
-            data=_build_pdf_cached(verdicts, source, intake, address_items),
+            data=_build_pdf_cached(
+                verdicts, source, intake, address_items,
+                readqc_payload, forensics_payload, geomatch_payload,
+            ),
             file_name="deficiency-report.pdf",
             mime="application/pdf",
             key="download_deficiency_pdf",
@@ -178,8 +214,9 @@ def render(
         )
         st.markdown(
             "<div class='download-popover-sub'>"
-            "Designed PDF — cover summary, per-section cards, and a "
-            "legend. Print and bring it to the trench."
+            "Designed PDF — cover summary, per-section evidence cards, "
+            "and an audit-trail appendix (every photo, every check, "
+            "every threshold). Print and bring it to the trench."
             "</div>",
             unsafe_allow_html=True,
         )
