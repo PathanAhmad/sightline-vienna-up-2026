@@ -16,6 +16,7 @@ We're building a prototype that ingests construction-site trench photos plus a G
 1. **[CLAUDE.md](CLAUDE.md)** — hard rules we cannot get wrong. Read first.
 2. **[PLAN.md](PLAN.md)** — what we're building, by when, with what stack.
 3. **[DECISIONS.md](DECISIONS.md)** — one-line log of every decision so far. No re-litigating.
+4. **[Documentation](https://pathanahmad.github.io/vienna-up-2026/)** — Sphinx docs for the main workflow and feature set.
 
 ## Schedule
 
