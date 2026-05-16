@@ -615,12 +615,20 @@ def _cover_flowables(
         "Live pipeline run" if source == "live" else "Demo dataset"
     )
 
+    n_boilerplate = sum(1 for r in bad_rows if _is_no_photos_only(r))
+    n_unique = n_bad - n_boilerplate
+
+    prose = _load_baked_prose(source)
+    intro_text = (prose or {}).get("intro") or _DEFAULT_INTRO
+
     out: list = [
         Paragraph("Trench photo deficiency report", S_H1),
         Paragraph(
             f"{source_line} &nbsp;·&nbsp; Generated {generated_on}",
             S_BODY_MUTED,
         ),
+        Spacer(1, 12),
+        Paragraph(intro_text, S_BODY),
         Spacer(1, 14),
         Paragraph("At a glance", S_H2),
     ]
@@ -644,52 +652,137 @@ def _cover_flowables(
     out.append(stat_row)
     out.append(Spacer(1, 14))
 
-    # Summary sentence — adds insight (top failure mode), doesn't restate
-    # the boxes above.
-    if n_total == 0:
-        summary = (
-            "No sections in this report. Run the pipeline first, then "
-            "regenerate."
-        )
-    elif n_bad == 0:
-        summary = (
-            f"All {n_total} sections passed every check. No action "
-            "needed in the field."
-        )
-    else:
-        bad_share = round(100 * n_bad / max(n_total, 1))
-        sentence = (
-            f"<b>{n_bad}</b> of <b>{n_total}</b> sections need attention "
-            f"({bad_share}% of the site)."
-        )
-        if top_label:
-            sentence += (
-                f" The most common reason is <b>{top_label}</b>."
-            )
-        summary = sentence
-    out.append(Paragraph(summary, S_LEAD))
+    # Interpretive paragraph. Prefer the Claude-generated version baked
+    # by the pipeline (src/cover_prose.py); fall back to a templated
+    # branch if there's no baked prose or the file's missing fields.
+    situation_text = (prose or {}).get("situation") or _cover_context_text(
+        n_total, n_bad, n_green, n_yellow, n_red,
+        n_unique, n_boilerplate, top_label,
+    )
+    out.append(Paragraph(situation_text, S_LEAD))
 
     if intake is not None:
         out.append(Spacer(1, 14))
         out.append(Paragraph("Photo intake", S_H2))
         out.append(Paragraph(
-            "How the photos that fed into those section verdicts broke "
-            "down. \"Passed every per-photo check\" is the pool of "
-            "photos that actually count toward the one-photo-per-five-"
-            "metres coverage rule.",
+            "These numbers describe the photos that came in for this "
+            "run. \"Passed every per-photo check\" is the pool of usable "
+            "photos that actually count toward the one-photo-every-"
+            "five-metres coverage rule — everything else either got "
+            "rejected (faces visible, off-topic, unreadable) or never "
+            "arrived in the first place.",
             S_BODY_MUTED,
         ))
         out.append(Spacer(1, 4))
         out.append(_intake_table(intake))
 
-    out.append(Spacer(1, 10))
-    out.append(Paragraph(
-        "Each card on the following pages lists a single section that "
-        "did not pass. Bring this report to the trench and tick each "
-        "item as you re-shoot or re-do the work.",
-        S_BODY,
-    ))
+    out.append(Spacer(1, 12))
+    closing_text = (prose or {}).get("closing") or _DEFAULT_CLOSING
+    out.append(Paragraph(closing_text, S_BODY))
     return out
+
+
+_DEFAULT_INTRO = (
+    "This report covers every stretch of trench in the project that "
+    "did not pass our automated photo review. A section is a short "
+    "stretch of trench, usually between 10 and 50 metres long. The "
+    "pages after this one are your re-shoot punch list — take the "
+    "report to the site and tick each section as you re-shoot or "
+    "re-do the work."
+)
+
+_DEFAULT_CLOSING = (
+    "The body of this report groups the flagged sections by FCP route. "
+    "Sections with the same issue (typically \"no photos yet\") are "
+    "collapsed into a single block per route to keep the document "
+    "short. The appendix at the back lists every passing section for "
+    "completeness and describes the eight checks each photo runs "
+    "through."
+)
+
+
+def _load_baked_prose(source: str) -> dict[str, str] | None:
+    """Read pipeline-baked cover prose from disk. Live runs read from
+    data/processed/report/cover_prose.json; demo fixture reads from
+    demo_fixtures/cover_prose.json (committed). Either may be absent —
+    the caller falls back to templated prose."""
+    from src import paths
+    from src.cover_prose import load_cover_prose
+
+    if source == "live":
+        candidates = [paths.REPORT_DIR / "cover_prose.json"]
+    else:
+        candidates = [paths.REPO_ROOT / "demo_fixtures" / "cover_prose.json"]
+    return load_cover_prose(*candidates)
+
+
+def _cover_context_text(
+    n_total: int,
+    n_bad: int,
+    n_green: int,
+    n_yellow: int,
+    n_red: int,
+    n_unique: int,
+    n_boilerplate: int,
+    top_label: str | None,
+) -> str:
+    """Two- or three-sentence interpretation of the at-a-glance numbers.
+
+    Reads as plain prose so the cover doesn't feel like a dashboard
+    export. The exact wording shifts with the shape of the run: a
+    clean run, a partially-shot project, a mostly-good project with a
+    handful of warnings, etc.
+    """
+    if n_total == 0:
+        return (
+            "There are no sections in this report. Run the QC pipeline "
+            "first, then regenerate the report to see the results."
+        )
+    if n_bad == 0:
+        return (
+            f"All <b>{n_total}</b> sections passed every check. "
+            "There is nothing to fix in the field — file the report "
+            "with the rest of the job documentation."
+        )
+
+    bad_share = round(100 * n_bad / max(n_total, 1))
+
+    if n_boilerplate == n_bad:
+        # Common at the start of a project — nothing has been shot yet.
+        return (
+            f"<b>All {n_bad}</b> flagged sections are in the same "
+            f"state: no photos have been uploaded for them yet. This "
+            "is what a project looks like before the crew starts "
+            "submitting evidence — submit the photos, re-run the QC "
+            "pipeline, and regenerate the report to see what is "
+            "actually passing."
+        )
+
+    sentences: list[str] = [
+        f"<b>{n_bad}</b> of <b>{n_total}</b> sections need attention "
+        f"({bad_share}% of the site)."
+    ]
+    if n_boilerplate and n_unique:
+        sentences.append(
+            f"<b>{n_boilerplate}</b> of those have no photos submitted "
+            f"yet — those are grouped together by route in the body. "
+            f"The remaining <b>{n_unique}</b> have specific issues to "
+            "address (missing warning tape, photos in the wrong place, "
+            "duplicates, and similar) and get their own per-section "
+            "card."
+        )
+    elif top_label:
+        sentences.append(
+            f"The most common reason is <b>{top_label}</b>. Each "
+            "flagged section has its own card on the pages that follow "
+            "with the specific action to take."
+        )
+    else:
+        sentences.append(
+            "Each flagged section has its own card on the pages that "
+            "follow with the specific action to take."
+        )
+    return " ".join(sentences)
 
 
 # ---- Body flowables: cards grouped by FCP -------------------------------

@@ -338,6 +338,22 @@ def main() -> int:
         verdicts, readqc, forensics, geomatch, inp.source, paths.SUMMARY_HTML
     )
 
+    # Bake cover prose so the deficiency PDF reads as a written report,
+    # not a templated dashboard export. Pipeline-time call keeps the
+    # dashboard demo free of live Claude calls. Falls back silently if
+    # the API key is missing or the call fails — the PDF still works.
+    from src.cover_prose import write_cover_prose
+    from src.pdf_report import compute_photo_intake
+
+    intake = compute_photo_intake(readqc, forensics, geomatch)
+    prose_path = paths.REPORT_DIR / "cover_prose.json"
+    prose_ok = write_cover_prose(verdicts, intake, prose_path)
+    if prose_ok:
+        print(f"[report] cover prose written → {prose_path.relative_to(paths.REPO_ROOT)}")
+    else:
+        print("[report] cover prose skipped (no API key or call failed) — "
+              "PDF will use templated prose")
+
     print(
         f"[report] source={inp.source} → "
         f"{n_def} deficiency rows, {n_nc} not-classified, "
