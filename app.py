@@ -511,7 +511,7 @@ def main() -> None:
             # framed as a pair instead of stacking the chat under the CTA.
             cta_l, cta_r = st.columns(2, gap="small")
             with cta_l:
-                download.render(verdicts)
+                download.render(verdicts, readqc, forensics, geomatch)
             with cta_r:
                 chat.render_inline()
         else:
