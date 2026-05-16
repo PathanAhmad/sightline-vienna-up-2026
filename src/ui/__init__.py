@@ -36,6 +36,7 @@ from .components import (
     map_view,
     segment_panel,
     topbar,
+    upload_panel,
 )
 
 
@@ -58,6 +59,7 @@ def inject_all_css() -> None:
         download.CSS,
         segment_panel.CSS,
         chat.CSS,
+        upload_panel.CSS,
     ]
     st.markdown("\n".join(chunks), unsafe_allow_html=True)
 
@@ -73,4 +75,5 @@ __all__ = [
     "download",
     "segment_panel",
     "chat",
+    "upload_panel",
 ]

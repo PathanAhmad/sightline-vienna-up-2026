@@ -21,7 +21,7 @@ from typing import Any
 
 import streamlit as st
 
-from src.ui.components import topbar
+from src.ui.components import archive_expand, topbar
 from src.ui.components.live_score import (
     render_result_card,
     score_uploaded_photo,
@@ -439,14 +439,16 @@ def render() -> None:
         _card_head(
             "02 · Photos",
             "Drop your trench photos",
-            "JPG / JPEG / PNG &middot; multiple files supported",
+            "JPG / JPEG / PNG or an archive (.zip / .tar / .tgz / .tar.gz "
+            "/ .tar.bz2)",
         )
         st.markdown(
             "<div class='drop-help'>"
-            "Drag a batch of photos onto the area below, or press "
-            "<kbd>Upload</kbd> to browse. Each photo runs through Claude "
-            "Sonnet 4.6 vision and is scored against the seven APG / NIS2 "
-            "checks &mdash; usually under six seconds per photo."
+            "Drag a batch of photos &mdash; or one archive containing "
+            "them &mdash; onto the area below, or press <kbd>Upload</kbd> "
+            "to browse. Each photo runs through Claude Sonnet 4.6 vision "
+            "and is scored against the seven APG / NIS2 checks &mdash; "
+            "usually under six seconds per photo."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -454,7 +456,9 @@ def render() -> None:
             _render_no_api_key_warning()
         uploaded_files = st.file_uploader(
             "Drag and drop or click to browse",
-            type=["jpg", "jpeg", "png"],
+            type=["jpg", "jpeg", "png",
+                  "zip", "tar", "tgz", "gz", "bz2", "tbz", "tbz2",
+                  "xz", "txz"],
             accept_multiple_files=True,
             key="batch_upload",
             label_visibility="collapsed",
@@ -465,43 +469,65 @@ def render() -> None:
         cache: dict[tuple[str, int], dict] = st.session_state.setdefault(
             "batch_score_cache", {}
         )
-        pending: list[tuple[Any, bytes, tuple[str, int]]] = []
+
+        # Expand archives into their image members. Non-archive uploads
+        # pass through unchanged. Each entry is (display_name, bytes).
+        # Archive errors land in `errors` so the user sees a clear
+        # message instead of a silent drop.
+        errors: list[tuple[str, str]] = []
+        members: list[tuple[str, bytes]] = []
         for f in uploaded_files:
-            file_bytes = f.getvalue()
-            key = (f.name, len(file_bytes))
+            raw = f.getvalue()
+            if archive_expand.is_archive(f.name):
+                try:
+                    pairs = archive_expand.expand(f.name, raw)
+                except ValueError as e:
+                    errors.append((f.name, str(e)))
+                    continue
+                if not pairs:
+                    errors.append((
+                        f.name,
+                        "no .jpg / .jpeg / .png images found inside",
+                    ))
+                    continue
+                members.extend(pairs)
+            else:
+                members.append((f.name, raw))
+
+        pending: list[tuple[str, bytes, tuple[str, int]]] = []
+        for display, payload in members:
+            key = (display, len(payload))
             if key not in cache or cache[key].get("qc") is None:
-                pending.append((f, file_bytes, key))
+                pending.append((display, payload, key))
 
         if pending:
             n = len(pending)
             progress = st.progress(0.0, text=f"Scoring 0 / {n} …")
-            for i, (f, file_bytes, key) in enumerate(pending, 1):
-                suffix = Path(f.name).suffix or ".jpg"
-                qc, cost, err = score_uploaded_photo(file_bytes, suffix)
+            for i, (display, payload, key) in enumerate(pending, 1):
+                suffix = Path(display).suffix or ".jpg"
+                qc, cost, err = score_uploaded_photo(payload, suffix)
                 cache[key] = {
                     "qc": qc, "cost": cost, "err": err,
-                    "image": file_bytes, "name": f.name,
+                    "image": payload, "name": display,
                 }
                 progress.progress(i / n, text=f"Scoring {i} / {n} …")
             progress.empty()
 
         # Build the result list for the summary bar.
         results: list[dict] = []
-        errors: list[tuple[str, str]] = []
-        for f in uploaded_files:
-            file_bytes = f.getvalue()
-            key = (f.name, len(file_bytes))
+        for display, payload in members:
+            key = (display, len(payload))
             row = cache.get(key)
             if row is None:
                 continue
             if row.get("err"):
-                errors.append((f.name, row["err"]))
+                errors.append((display, row["err"]))
                 continue
             if row.get("qc") is None:
                 continue
             label, _ = verdict_for_photo(row["qc"])
             results.append({
-                "name": f.name,
+                "name": display,
                 "qc": row["qc"],
                 "cost": row["cost"],
                 "image": row["image"],

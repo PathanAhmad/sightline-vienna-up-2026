@@ -44,8 +44,15 @@ from src.ui import (
     map_view,
     segment_panel,
     topbar,
+    upload_panel,
 )
 from src.ui.components.hero import HeroStats
+from src.ui.components.live_geomatch import (
+    _load_geom_utm,
+    qc_to_geomatch_row,
+    qc_to_readqc_row,
+    recompute_verdicts,
+)
 
 
 # ---- Paths --------------------------------------------------------------
@@ -206,6 +213,34 @@ def compute_hero_stats(
     )
 
 
+# ---- Lot-bundle helpers -------------------------------------------------
+
+def _seed_lot_verdicts(geom_handle: dict) -> pd.DataFrame:
+    """One all-RED row per segment in the loaded lot.
+
+    The dashboard renders the lot's trenches even before any photos have
+    been scored. Without a verdict row per segment, the map would
+    correctly default-color them red (via `verdicts_by_segment.get`),
+    but the hero stats would say "0 segments" -- which contradicts the
+    map. Seeding gives both surfaces the same view of the lot's size.
+    """
+    rows = [
+        {
+            "segment_id": seg_id,
+            "fcp_name": geom_handle["seg_fcp"].get(seg_id, ""),
+            "length_m": round(length_m, 2),
+            "photo_count": 0,
+            "compliant_photo_count": 0,
+            "max_gap_m": round(length_m, 2),
+            "density_photos_per_5m": 0.0,
+            "verdict": "RED",
+            "reasons": "no compliant photos snapped",
+        }
+        for seg_id, length_m in geom_handle["seg_length_m"].items()
+    ]
+    return pd.DataFrame(rows)
+
+
 # ---- Main ---------------------------------------------------------------
 
 def main() -> None:
@@ -249,14 +284,96 @@ def main() -> None:
     )
 
     paths = resolve_paths()
-    verdicts = load_verdicts(str(paths.verdicts_csv))
-    geomatch = load_geomatch(str(paths.geomatch_csv))
-    readqc = load_jsonl(str(paths.readqc_jsonl))
-    forensics = load_jsonl(str(paths.forensics_jsonl))
-    manifest = load_manifest(str(paths.manifest_sqlite))
-    trenches = load_geojson(str(paths.trenches_geojson))
-    fcps = load_geojson(str(paths.fcps_geojson))
-    cluster = load_geojson(str(paths.cluster_geojson))
+    session_lot = st.session_state.get("session_lot")
+
+    if session_lot:
+        # Operator dropped a contractor bundle: use the bundle's geojsons
+        # for the map, and start with an empty data set -- the on-disk
+        # verdicts.csv / geomatch.csv / readqc.jsonl all belong to the
+        # *previous* lot's trenches, so mixing them in would surface
+        # ghost segments that don't exist in this lot.
+        trenches_path = Path(session_lot["trenches_path"])
+        fcps_path = Path(session_lot["fcps_path"])
+        cluster_path = Path(session_lot["cluster_path"])
+        trenches = load_geojson(str(trenches_path))
+        fcps = load_geojson(str(fcps_path))
+        cluster = load_geojson(str(cluster_path))
+        geomatch_cols = [
+            "photo_id", "lat", "lon", "coord_source",
+            "segment_id", "segment_t", "snap_distance_m",
+            "fcp_name", "fcp_assignment",
+            "label_match", "latlon_vs_address_flag",
+        ]
+        geomatch = pd.DataFrame(columns=geomatch_cols)
+        # lat/lon need numeric dtype so the photo_points filter works.
+        geomatch["lat"] = pd.to_numeric(geomatch["lat"], errors="coerce")
+        geomatch["lon"] = pd.to_numeric(geomatch["lon"], errors="coerce")
+        readqc = []
+        forensics = []
+        manifest = {}
+        # Verdicts start empty; we seed one all-RED row per segment
+        # *after* the geom_handle loads (it has the segment lengths).
+        # Until then, an empty DF with the right columns keeps any
+        # `.value_counts()` / `.to_dict()` calls happy on early returns.
+        verdicts = pd.DataFrame(columns=[
+            "segment_id", "fcp_name", "length_m", "photo_count",
+            "compliant_photo_count", "max_gap_m",
+            "density_photos_per_5m", "verdict", "reasons",
+        ])
+    else:
+        trenches_path = paths.trenches_geojson
+        fcps_path = paths.fcps_geojson
+        cluster_path = paths.cluster_geojson
+        verdicts = load_verdicts(str(paths.verdicts_csv))
+        geomatch = load_geomatch(str(paths.geomatch_csv))
+        readqc = load_jsonl(str(paths.readqc_jsonl))
+        forensics = load_jsonl(str(paths.forensics_jsonl))
+        manifest = load_manifest(str(paths.manifest_sqlite))
+        trenches = load_geojson(str(paths.trenches_geojson))
+        fcps = load_geojson(str(paths.fcps_geojson))
+        cluster = load_geojson(str(paths.cluster_geojson))
+
+    # ---- Live uploads: merge into the on-disk data ---------------------
+    # Geopandas is heavy; only load when we actually have uploads (or are
+    # about to render the upload panel, which is always on the dash view).
+    # `_load_geom_utm` is @st.cache_resource so the cost is paid once per
+    # session, not per rerun (cache is keyed on the path triple, so a
+    # newly loaded lot bundle keys a fresh entry without invalidating
+    # the default lot's cached geom).
+    try:
+        geom_handle = _load_geom_utm(
+            str(trenches_path),
+            str(fcps_path),
+            str(cluster_path),
+        )
+    except Exception as e:
+        # If geopandas / shapely isn't installed or a geojson fails to
+        # parse, fall back to a no-snap upload experience -- the photos
+        # still score, they just don't recolor segments.
+        geom_handle = None
+        st.session_state["_dash_geom_error"] = repr(e)
+
+    # If the dashboard is in session-lot mode, seed verdicts AFTER we've
+    # built the geom_handle so we can iterate the lot's real segments.
+    if session_lot and geom_handle is not None and verdicts.empty:
+        verdicts = _seed_lot_verdicts(geom_handle)
+
+    upload_state: list[dict] = st.session_state.get("dashboard_uploads", [])
+    upload_readqc: list[dict] = []
+    upload_geomatch: list[dict] = []
+    for u in upload_state:
+        if u.get("err") or u.get("qc") is None:
+            continue
+        upload_readqc.append(qc_to_readqc_row(u["qc"], u["photo_id"]))
+        upload_geomatch.append(
+            qc_to_geomatch_row(u["photo_id"], u.get("lat"), u.get("lon"), u.get("snap"))
+        )
+
+    if upload_readqc and geom_handle is not None:
+        verdicts, geomatch, readqc, forensics = recompute_verdicts(
+            verdicts, geomatch, readqc, forensics,
+            upload_geomatch, upload_readqc, geom_handle,
+        )
 
     readqc_by_id = {r["photo_id"]: r for r in readqc}
     forensics_by_id = {r["photo_id"]: r for r in forensics}
@@ -272,22 +389,40 @@ def main() -> None:
     stats = compute_hero_stats(verdicts, readqc, forensics, geomatch)
 
     # ---- Page assembly -------------------------------------------------
-    topbar.render(
-        project_name="Maria Rain",
-        project_location="Carinthia · L101 Goltschacher Straße",
-        source=paths.source,
-    )
+    if session_lot:
+        topbar.render(
+            project_name=session_lot.get("lot_id", "Uploaded lot"),
+            project_location="Loaded from contractor bundle",
+            source="uploaded lot",
+        )
+    else:
+        topbar.render(
+            project_name="Maria Rain",
+            project_location="Carinthia · L101 Goltschacher Straße",
+            source=paths.source,
+        )
     hero.render(stats)
 
     layout.begin_dash_row()
     map_col, rail_col = st.columns([2, 1], gap="small")
 
-    photo_points = (
-        geomatch[geomatch["lat"].notna() & geomatch["lon"].notna()]
-        [["lat", "lon"]].to_dict("records")
-    )
+    # Split base geomatch (dark dots) from live uploads (bright orange).
+    # Uploads carry per-row photo_ids prefixed `live_` -- see
+    # upload_panel._build_entry.
+    upload_pids = {u["photo_id"] for u in upload_state}
+    valid_geo = geomatch[geomatch["lat"].notna() & geomatch["lon"].notna()]
+    base_geo = valid_geo[~valid_geo["photo_id"].isin(upload_pids)]
+    upload_geo = valid_geo[valid_geo["photo_id"].isin(upload_pids)]
+    photo_points = base_geo[["lat", "lon"]].to_dict("records")
+    name_by_pid = {u["photo_id"]: u["name"] for u in upload_state}
+    upload_points = [
+        {"lat": r["lat"], "lon": r["lon"],
+         "tooltip": name_by_pid.get(r["photo_id"], "uploaded photo")}
+        for r in upload_geo[["lat", "lon", "photo_id"]].to_dict("records")
+    ]
     m = map_view.build_map(
         trenches, fcps, cluster, verdicts_by_segment, photo_points,
+        upload_points=upload_points,
     )
     with map_col:
         click = st_folium(
@@ -319,7 +454,9 @@ def main() -> None:
             demo_tour.render(
                 verdicts_by_segment, geomatch, readqc, forensics,
             )
-            catches.render(stats)
+            # Upload panel sits where the old "Needs attention" list was;
+            # drops here score live and recolor any segments they snap to.
+            upload_panel.render(geom_handle)
             # Download + Ask sit on one 50/50 row -- two primary actions
             # framed as a pair instead of stacking the chat under the CTA.
             cta_l, cta_r = st.columns(2, gap="small")

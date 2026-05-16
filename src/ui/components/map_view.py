@@ -40,6 +40,7 @@ def build_map(
     cluster: dict,
     verdicts_by_segment: dict[str, dict],
     photo_points: list[dict],
+    upload_points: list[dict] | None = None,
 ) -> folium.Map:
     """Build the folium map. Each trench feature carries its verdict in
     properties so the click handler can read it back without a roundtrip.
@@ -133,6 +134,22 @@ def build_map(
             fillColor="#1e293b",
             fillOpacity=0.7,
         ).add_to(m)
+
+    # Live uploads -- bigger, brighter, on top so the operator sees
+    # exactly where their drop landed.
+    upload_layer = folium.FeatureGroup(name="Your uploads", show=True)
+    for pt in (upload_points or []):
+        tooltip = pt.get("tooltip") or "uploaded photo"
+        folium.CircleMarker(
+            location=[pt["lat"], pt["lon"]],
+            radius=7,
+            color="#1e293b",
+            weight=2,
+            fillColor="#f97316",
+            fillOpacity=0.95,
+            tooltip=tooltip,
+        ).add_to(upload_layer)
+    upload_layer.add_to(m)
 
     folium.LayerControl(collapsed=True).add_to(m)
     return m
