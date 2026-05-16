@@ -23,10 +23,20 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-# Hard cap on any text field we pass back to the model. Photo notes are
-# capped at 500 chars on the scoring side already (see QCResult.note),
-# but addresses / paper-label codes have no upstream cap.
-_MAX_FIELD_LEN = 300
+# Hard cap on any text field we pass back to the model. Matches the
+# upstream QCResult.note cap (500) so notes don't get re-trimmed and
+# lose context for "why did X fail" follow-ups. The defense against
+# malicious overlay text is the photo_data envelope + system prompt,
+# not the length cap.
+_MAX_FIELD_LEN = 500
+
+# NDA-sensitive fields we DROP entirely from any tool output. The
+# model can talk about a photo's verdict and the seven checks without
+# ever seeing the street address or coordinates. paper_label_code
+# (F-code + R-code) is kept -- the F-code is already shown on the
+# dashboard, and the bot's system prompt allows referring to "section
+# F171" but never to a verbatim address.
+_NDA_DROP_FIELDS = {"overlay_address", "overlay_latlon"}
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
@@ -140,8 +150,13 @@ def lookup_uploaded_photo(name: str) -> dict[str, Any]:
         return {"status": "pending", "message": "Scoring not yet complete."}
 
     label, _ = verdict_for_photo(qc)
-    # QCResult is a pydantic model -- dump to a plain dict, then scrub.
+    # QCResult is a pydantic model -- dump to a plain dict, drop NDA
+    # fields outright, then scrub what's left. Belt-and-braces: the
+    # system prompt already tells the bot not to read addresses
+    # verbatim, but the right place to enforce that is in code.
     qc_dict = qc.model_dump() if hasattr(qc, "model_dump") else dict(qc)
+    for k in _NDA_DROP_FIELDS:
+        qc_dict.pop(k, None)
 
     return {
         "status": "ok",
@@ -163,7 +178,13 @@ _FIXTURE_VERDICTS = _REPO_ROOT / "demo_fixtures" / "verdicts.csv"
 
 @st.cache_data(show_spinner=False)
 def _load_verdicts_for_chat(path_str: str) -> pd.DataFrame:
-    """Cached read of verdicts.csv -- shared across chat turns."""
+    """Cached read of verdicts.csv -- shared across chat turns.
+
+    Caveat: keyed only by path string. If the live CSV is rewritten by
+    the pipeline mid-session, the chat serves the stale frame until
+    the Streamlit cache is cleared (reload page or `st.cache_data.clear()`).
+    Acceptable for the demo where the pipeline doesn't churn live.
+    """
     df = pd.read_csv(path_str, dtype=str, keep_default_na=False)
     df["length_m"] = pd.to_numeric(df["length_m"], errors="coerce")
     df["photo_count"] = pd.to_numeric(
@@ -179,6 +200,11 @@ def dashboard_overview() -> dict[str, Any]:
     back to `demo_fixtures/verdicts.csv`. Returns counts, %-compliant,
     and the top 5 worst RED + top 5 YELLOW segments by length so the
     model can answer "what's the worst?" in one round-trip.
+
+    Wrapped in try/except: verdicts.csv schema has drifted in this repo
+    before and we'd rather degrade than crash the chat. Any unexpected
+    shape returns status:"error" with a generic message; the actual
+    exception goes to stderr for debugging.
     """
     path = _LIVE_VERDICTS if _LIVE_VERDICTS.exists() else _FIXTURE_VERDICTS
     if not path.exists():
@@ -187,39 +213,50 @@ def dashboard_overview() -> dict[str, Any]:
             "message": "No pipeline output available (neither live nor fixtures).",
         }
 
-    df = _load_verdicts_for_chat(str(path))
-    n = len(df)
-    counts = df["verdict"].value_counts().to_dict()
-    n_green = int(counts.get("GREEN", 0))
-    n_yellow = int(counts.get("YELLOW", 0))
-    n_red = int(counts.get("RED", 0))
+    try:
+        df = _load_verdicts_for_chat(str(path))
+        n = len(df)
+        counts = df["verdict"].value_counts().to_dict()
+        n_green = int(counts.get("GREEN", 0))
+        n_yellow = int(counts.get("YELLOW", 0))
+        n_red = int(counts.get("RED", 0))
 
-    def _top(verdict: str, k: int = 5) -> list[dict]:
-        rows = (
-            df[df["verdict"] == verdict]
-            .sort_values("length_m", ascending=False)
-            .head(k)
-        )
-        return [
-            {
-                "segment_id": _scrub(r["segment_id"]),
-                "fcp_name": _scrub(r.get("fcp_name", "")),
-                "length_m": float(r["length_m"]) if pd.notna(r["length_m"]) else None,
-                "photo_count": int(r["photo_count"]),
-                "reasons": _scrub(r.get("reasons", "")),
-            }
-            for r in rows.to_dict("records")
-        ]
+        def _top(verdict: str, k: int = 5) -> list[dict]:
+            rows = (
+                df[df["verdict"] == verdict]
+                .sort_values("length_m", ascending=False)
+                .head(k)
+            )
+            return [
+                {
+                    "segment_id": _scrub(r["segment_id"]),
+                    "fcp_name": _scrub(r.get("fcp_name", "")),
+                    "length_m": float(r["length_m"]) if pd.notna(r["length_m"]) else None,
+                    "photo_count": int(r["photo_count"]),
+                    "reasons": _scrub(r.get("reasons", "")),
+                }
+                for r in rows.to_dict("records")
+            ]
 
-    return {
-        "status": "ok",
-        "source": "live" if path == _LIVE_VERDICTS else "fixtures",
-        "n_segments": n,
-        "verdict_counts": {"GREEN": n_green, "YELLOW": n_yellow, "RED": n_red},
-        "pct_compliant": round((n_green / n * 100) if n else 0.0, 1),
-        "worst_red": _top("RED"),
-        "worst_yellow": _top("YELLOW"),
-    }
+        return {
+            "status": "ok",
+            "source": "live" if path == _LIVE_VERDICTS else "fixtures",
+            "n_segments": n,
+            "verdict_counts": {"GREEN": n_green, "YELLOW": n_yellow, "RED": n_red},
+            "pct_compliant": round((n_green / n * 100) if n else 0.0, 1),
+            "worst_red": _top("RED"),
+            "worst_yellow": _top("YELLOW"),
+        }
+    except Exception as e:
+        import sys
+        print(f"dashboard_overview failed: {e!r}", file=sys.stderr)
+        return {
+            "status": "error",
+            "message": (
+                "Couldn't read the project summary right now. "
+                "The verdicts table may be missing expected columns."
+            ),
+        }
 
 
 # ---- Anthropic tool schemas ---------------------------------------------

@@ -31,9 +31,12 @@ _MAX_TOOL_ITERATIONS = 5
 _MAX_OUTPUT_TOKENS = 800
 MAX_SESSION_SPEND_USD = 0.50
 
-# Haiku 4.5 pricing — keep in sync with PRICING in src/readqc.py.
-_PRICE_IN_PER_MTOK = 1.00
-_PRICE_OUT_PER_MTOK = 5.00
+# Single source of truth for Haiku pricing -- imported from the scorer
+# module rather than duplicated here. PRICING is keyed by full model ID.
+from src.readqc import PRICING as _PRICING
+
+_PRICE_IN_PER_MTOK = _PRICING[_MODEL]["in"]
+_PRICE_OUT_PER_MTOK = _PRICING[_MODEL]["out"]
 
 
 SYSTEM_PROMPT = """You are a friendly assistant helping someone understand a fibre-trench inspection project. Speak like a polite, patient inspector explaining things to a colleague who is new to the job. Assume the person asking is NOT a technical expert.
@@ -123,14 +126,25 @@ def _wrap_tool_result(payload: dict) -> str:
 def _run_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     """Dispatch one tool call. Failures are returned as error dicts
     rather than raised, so the model can recover (e.g. ask the user to
-    clarify a filename)."""
+    clarify a filename).
+
+    We surface only the exception *type* to the model -- never repr(e).
+    A future FileNotFoundError repr would echo a filesystem path into
+    the data envelope and onward to the user. The full repr goes to
+    stderr for server-side debugging.
+    """
     fn = TOOL_FUNCTIONS.get(name)
     if fn is None:
         return {"status": "error", "message": f"Unknown tool: {name}"}
     try:
         return fn(**args) if args else fn()
     except Exception as e:
-        return {"status": "error", "message": f"Tool {name} failed: {e!r}"}
+        import sys
+        print(f"chat tool {name!r} failed: {e!r}", file=sys.stderr)
+        return {
+            "status": "error",
+            "message": f"Tool {name} failed ({type(e).__name__}).",
+        }
 
 
 def respond(messages: list[dict]) -> tuple[str, float]:
@@ -192,6 +206,11 @@ def respond(messages: list[dict]) -> tuple[str, float]:
             })
         convo.append({"role": "user", "content": tool_results})
 
+    # `convo` here may end on a dangling assistant tool_use turn (no
+    # paired tool_result) because we ran out of iterations. We do NOT
+    # persist `convo` -- the caller's `messages` list only sees the
+    # final plain-text reply, so next turn the history starts fresh
+    # from there and stays well-formed for Anthropic.
     return (
         "I hit my tool-use limit for this question. Try asking something "
         "more specific.",
