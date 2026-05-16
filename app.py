@@ -63,7 +63,11 @@ REAL_GEO = REPO_ROOT / "data" / "geo"
 REAL_PHOTOS_DIR = REPO_ROOT / "data" / "Fotos" / "Fotos"
 FIXTURE_DIR = REPO_ROOT / "demo_fixtures"
 FIXTURE_GEO = FIXTURE_DIR / "geo"
-RESOURCES_PHOTOS_DIR = REPO_ROOT / "Resources" / "all"
+# Flat photo dir used as the fixtures-mode photo source (and as the
+# segment_panel fallback when the live `data/Fotos/Fotos/` symlinks
+# are dangling). Was `<repo>/Resources/all/`; that path got moved
+# under data/ but the symlinks weren't updated.
+RESOURCES_PHOTOS_DIR = REPO_ROOT / "data" / "Resources" / "all"
 
 
 @dataclass

@@ -131,7 +131,14 @@ PHOTO_CHECK_FIELDS = [
 
 
 # Fallback dir for photos when the live photo tree isn't mounted.
-_RESOURCES_PHOTOS_DIR = Path(__file__).resolve().parents[3] / "Resources" / "all"
+# `data/Resources/all/` is the actual flat-photo tree. The old
+# `Resources/all/` location was moved into `data/` -- the symlinks
+# under `data/Fotos/Fotos/` still point at the old path and are
+# therefore dangling, so this fallback is the only working source on
+# checkouts that don't rebuild the symlinks.
+_RESOURCES_PHOTOS_DIR = (
+    Path(__file__).resolve().parents[3] / "data" / "Resources" / "all"
+)
 
 
 def _fmt_meters(value: Any) -> str:
