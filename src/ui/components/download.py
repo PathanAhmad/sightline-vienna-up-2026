@@ -11,6 +11,7 @@ with two options:
 from __future__ import annotations
 
 import html
+import re
 
 import pandas as pd
 import streamlit as st
@@ -144,32 +145,87 @@ _VERDICT_LABEL: dict[str, str] = {
 }
 
 
+# Fixed-string reasons emitted verbatim by src/classify.py.
+_FIXED_SUBS: dict[str, str] = {
+    "personal_data_visible":
+        "personal data visible in a photo — must be re-shot",
+    "latlon_vs_address_disagree":
+        "photo GPS does not match the printed address",
+    "off_cluster":
+        "photo location is far from other photos of this section",
+    "no compliant photos snapped":
+        "no usable photos for this section",
+}
+
+
+# Templated reasons emitted by src/classify.py. Order matters: more
+# specific patterns first so they preempt the catch-all variants.
+_REGEX_SUBS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"relevance=portrait"),
+     "photo is mostly a person, not the trench"),
+    (re.compile(r"relevance=off_topic"),
+     "photo is not of the trench"),
+    (re.compile(r"relevance=unreadable"),
+     "photo is too blurry or dark to read"),
+    (re.compile(r"relevance=(\w+)"),
+     r"photo flagged as \1 — not a usable trench photo"),
+    (re.compile(r"snap_distance=(\d+)m"),
+     r"photo is \1 m off the trench centreline"),
+    (re.compile(r"phase=paper_label"),
+     "photo shows only the paper label — no trench evidence"),
+    (re.compile(r"phase=staging"),
+     "photo shows staging only — no trench evidence"),
+    (re.compile(r"phase=other"),
+     "photo does not show a recognised trench stage"),
+    (re.compile(r"phase=(\w+)"),
+     r"photo at phase \1 — no trench evidence"),
+    (re.compile(r"warning_tape_visible=no"),
+     "no warning tape visible"),
+    (re.compile(r"sand_bedding_visible=no"),
+     "no sand bedding visible"),
+    (re.compile(r"duct_visible=no"),
+     "no duct visible"),
+    (re.compile(r"density \d+/(\d+)m below 1/10m"),
+     r"too few photos for the section length (\1 m)"),
+    (re.compile(
+        r"first compliant photo at meter (\d+) "
+        r"\(>(\d+)m from start\)"),
+     r"first usable photo is \1 m in — "
+     r"no coverage in the first \2 m"),
+    (re.compile(
+        r"last compliant photo at meter (\d+) "
+        r"\(>(\d+)m from end of (\d+)m\)"),
+     r"last usable photo is at \1 m — last "
+     r"\2 m of the \3 m section uncovered"),
+    (re.compile(
+        r"max gap (\d+)m > (\d+)m between meter "
+        r"(\d+) and meter (\d+)"),
+     r"\1 m gap between meter \3 and meter \4 "
+     r"(allowed maximum: \2 m)"),
+    (re.compile(r"(\d+) personal-data photo\(s\)"),
+     r"\1 photo(s) contain visible personal data"),
+    (re.compile(r"(\d+)x (.+)"),
+     r"\1 photos: \2"),
+]
+
+
 def _humanize_reason(reason: str) -> str:
-    """Translate the most common jargon in a single reason string into
-    plain English. Unknown reasons pass through verbatim — we never
-    silently hide information the inspector might need."""
+    """Translate one reason string into plain English for the crew.
+
+    Two passes: fixed-string lookup first, then regex substitutions
+    (more specific patterns earlier in the list). Anything we don't
+    recognise passes through verbatim — silent omission would hide
+    info the inspector might need.
+    """
     r = reason.strip()
     if not r:
         return r
-    subs: list[tuple[str, str]] = [
-        ("personal_data_visible",
-         "personal data visible in photo (needs re-shoot)"),
-        ("latlon_vs_address_disagree",
-         "photo GPS does not match the printed address"),
-        ("off_cluster",
-         "photo location is far from other photos of this section"),
-        ("relevance=portrait",
-         "photo is mostly a person, not the trench"),
-        ("relevance=off_topic",
-         "photo is not of the trench"),
-        ("relevance=unreadable",
-         "photo could not be read (blurry or too dark)"),
-        ("max gap", "gap without any photos"),
-        ("snap_distance=", "photo is off the trench centreline by "),
-    ]
-    for needle, plain in subs:
-        if needle in r:
-            r = r.replace(needle, plain)
+    if r in _FIXED_SUBS:
+        return _FIXED_SUBS[r]
+    for pattern, repl in _REGEX_SUBS:
+        new_r, n = pattern.subn(repl, r)
+        if n:
+            r = new_r
     return r
 
 

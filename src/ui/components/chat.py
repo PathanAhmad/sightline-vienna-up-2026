@@ -98,20 +98,6 @@ CSS = """
     border-color: #075985 !important;
 }
 
-/* ---- Match the sibling Download CTA to the same chrome --------------
-   download.py owns the canonical style, but here we tighten *just*
-   the height + radius + shadow + padding for the rail pair so they
-   read as one matched action strip. Scoped to the row that contains
-   the chat button so we don't touch download buttons elsewhere. */
-[data-testid="stHorizontalBlock"]:has(.st-key-chat_inline) .stDownloadButton > button {
-    min-height: 44px !important;
-    height: 44px !important;
-    padding: var(--s-2) var(--s-4) !important;
-    font-size: 13.5px !important;
-    border-radius: var(--r-md) !important;
-    box-shadow: var(--shadow-card) !important;
-}
-
 /* ---- Dialog chrome ----------------------------------------------------
    Streamlit's dialog renders inside a portal with [role="dialog"]. Make
    it nearly viewport-tall so the transcript has room to breathe, and
