@@ -12,7 +12,7 @@ The whole tool is a chain of five steps. Each step reads the output of the one b
 
 **Stage 2 — Forensics.** We give every photo a visual fingerprint (a short code that's identical for two photos that look the same, even after one has been resized or re-saved). Photos with matching fingerprints get grouped — that's how duplicates surface. We also do a light tampering test: re-save each photo at a known quality, compare it to the original, and look for regions that "stand out" in a way that suggests they were edited. Output: a fingerprint per photo + a tamper score.
 
-**Stage 3 — Read.** For each *unique* photo (one per fingerprint group — we don't pay to look at the same image twice), we send it to **Claude** (the AI). Claude returns a structured answer: the six visual checks, what stage of work the photo shows, whether it's even relevant, plus everything printed on the photo — the date, the street address, the GPS coordinates if visible, and the paper label code held up in frame. One call per photo, takes about 4 seconds, costs about half a cent.
+**Stage 3 — Read.** For each *unique* photo (one per fingerprint group — we don't pay to look at the same image twice), we send it to **Claude** (the AI). Claude returns a structured answer: the six visual checks, what stage of work the photo shows, whether it's even relevant, plus everything printed on the photo — the date, the street address, the GPS coordinates if visible, and the paper label code held up in frame. One call per photo, costs about half a cent.
 
 **Stage 4 — Map.** We figure out which stretch of trench each photo belongs to:
 - If Claude read GPS coordinates off the photo, we drop a pin on the map at those coordinates and snap to the nearest trench line.
@@ -27,7 +27,7 @@ The result of all five stages is a handful of files. The dashboard reads those f
 
 Short list on purpose. Every tool earns its place.
 
-- **Claude Sonnet 4.6** — the AI that looks at the photo and answers the six visual checks. Made by Anthropic. We picked Sonnet over the cheaper Haiku version after testing both on five hard photos (night shots, occluded overlays, weird GPS formats). Sonnet got 3 out of 5 right where Haiku got 1. The price difference for our whole batch was $10 — worth it.
+- **Claude Sonnet 4.6** — the AI that looks at the photo and answers the six visual checks. Made by Anthropic. We picked Sonnet over the cheaper Haiku version after testing both on five hard photos (night shots, occluded overlays, weird GPS formats). Sonnet won three, tied one, lost one — net better on the hardest cases. The price difference for our whole batch was $10 — worth it.
 - **Perceptual hash** (`imagehash` library) — the visual-fingerprint method. Turns each photo into a 16-character code. Comparing 3,929 photos against each other takes a few seconds and costs nothing. This is how we find duplicates without an AI in the loop.
 - **ELA — Error Level Analysis** (Pillow library) — the tampering check. Re-saves a photo at a known quality and looks at where the new version differs from the original. Edited regions stand out. It's a hint, not proof — we surface it but don't auto-fail on it.
 - **Nominatim** — the address-to-coordinates lookup. Free and public, run by the OpenStreetMap project. We use it as a fallback when the photo only shows a street address, not GPS coordinates.
@@ -50,7 +50,7 @@ That's the whole stack. Notably absent: no GPU, no custom-trained model, no clou
 - **GPS formats** the AI handles: four (degrees-with-dots, degrees-with-commas-for-the-decimal which is the German locale, plain decimal, labeled decimal)
 - **Manual baseline** for the same review: 3–5 days per project zone. Nine zones is roughly a month of full-time human work per project.
 
-To scale this to APG's full 424,000-photo backlog: same code, more time. Roughly **$1,600** in AI fees and **a few days** of laptop time. No re-engineering needed.
+To scale this to APG's full 424,000-photo backlog: same code, more time. Roughly **$1,900** in AI fees and **a few days** of laptop time. No re-engineering needed.
 
 ## 4. The tricky problems and how we got past them
 
@@ -64,7 +64,7 @@ Worth knowing because a judge might dig into any of these.
 
 **Same-street address mismatch is normal, not fraud.** Photos sometimes show one street number (where the photographer is standing) while a paper label in frame shows a different number on the same street (the property being connected to the grid). That's expected, not suspicious. We only flag mismatches when the streets are *different* AND the points are over 150 meters apart.
 
-**Privacy in a screen-recorded demo.** A photo flagged as containing a face can't be displayed on a page that's being projected at the audience. The fix: when the dashboard shows a flagged photo, it swaps the image for a small privacy-notice card instead. The flag still counts in the back-end report; only the on-screen image is hidden.
+**Privacy in a screen-recorded demo.** A photo flagged as containing a face can't be displayed on a page that's being projected at the audience. The fix: when the dashboard shows a flagged photo, it swaps the image for a small privacy-notice card instead. The flag still counts in the saved report files; only the on-screen image is hidden.
 
 **The AI could be wrong, and we measure it.** The dataset came with 219 photos hand-tagged as either "depth-measurement-primary" or "duct-laying-primary." After our AI runs, we compare its guesses against those known labels and report the agreement rate. That's a pitchable accuracy number, not just "trust us."
 
@@ -90,7 +90,7 @@ Worth knowing because a judge might dig into any of these.
 > Two of the eight checks exist exactly for that. The duplicate-photo check catches reusing a good photo across multiple jobs. The GPS-vs-address check catches a photo taken at the wrong site. Both are *easier* to catch automatically than by hand — a human reviewer would have to remember every photo they'd ever seen.
 
 > **"How would you scale to 424,000 photos?"**
-> Same code, more time and money. Roughly $1,600 in AI fees, a few days of laptop time. The tool already handles every photo independently, so it parallelizes trivially.
+> Same code, more time and money. Roughly $1,900 in AI fees, a few days of laptop time. Each photo is reviewed independently, so we can run many at once — no rewrite needed to scale up.
 
 > **"Why not train your own model?"**
 > Training a custom model on 30 hand-labeled photos per category would underperform the off-the-shelf AI by a wide margin, and it would have eaten the whole hackathon. The right tool for "is the orange tape visible?" is a vision-capable AI, not a custom-trained detector.
