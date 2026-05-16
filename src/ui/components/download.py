@@ -1,10 +1,16 @@
-"""Download CTA — the single primary action on the rail.
+"""Download CTA — popover menu offering CSV or print-friendly HTML.
 
-Streamlit's `st.download_button` is the only on-screen primary
-(filled accent) button. Other Streamlit buttons are styled as
-secondary in base.py.
+The visible trigger on the rail is a primary (accent) button styled to
+match the adjacent "Ask QC bot" CTA. Clicking it opens a small popover
+with two options:
+
+  * Raw CSV       — full field set, for the reviewer's spreadsheet.
+  * Field report  — plain-language HTML, designed for a foreman to open
+                    in a browser and "Print → Save as PDF" for the crew.
 """
 from __future__ import annotations
+
+import html
 
 import pandas as pd
 import streamlit as st
@@ -12,48 +18,308 @@ import streamlit as st
 
 CSS = """
 <style>
-/* Force the download container itself to fill the column width. Without
-   this, .stDownloadButton sizes to button content (~328px) and leaves a
-   visible gap to the right of the CTA inside the rail. */
-.stDownloadButton {
+/* ---- Popover trigger -- match the original accent CTA --------------- */
+[data-testid="stHorizontalBlock"]:has(.st-key-chat_inline)
+    [data-testid="stPopover"] button {
+    background: var(--c-accent) !important;
+    color: white !important;
+    border: 1px solid var(--c-accent) !important;
+    border-radius: var(--r-md) !important;
+    padding: var(--s-2) var(--s-4) !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    font-weight: 600 !important;
+    font-size: 13.5px !important;
+    width: 100% !important;
+    box-shadow: var(--shadow-card) !important;
+}
+[data-testid="stHorizontalBlock"]:has(.st-key-chat_inline)
+    [data-testid="stPopover"] button:hover {
+    background: #075985 !important;
+    border-color: #075985 !important;
+}
+
+/* ---- Inside the popover panel: stacked, subtler download buttons.
+   The panel is rendered in a portal at body level, so the chat-row
+   `:has()` overrides don't reach it. --------------------------------- */
+[data-testid="stPopoverBody"] .stDownloadButton,
+div[data-baseweb="popover"] .stDownloadButton {
     width: 100%;
     display: block;
+    margin-top: 6px;
 }
-.stDownloadButton > button {
-    background: var(--c-accent);
-    color: white !important;
-    border: 1px solid var(--c-accent);
+[data-testid="stPopoverBody"] .stDownloadButton > button,
+div[data-baseweb="popover"] .stDownloadButton > button {
+    background: var(--c-surface);
+    color: var(--c-text) !important;
+    border: 1px solid var(--c-border-soft);
     border-radius: var(--r-sm);
-    padding: var(--s-3) var(--s-4);
-    min-height: 48px;
-    font-weight: 600;
-    font-size: 14px;
+    padding: 10px 12px;
+    min-height: 44px;
     width: 100%;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: left;
     box-shadow: none;
 }
-.stDownloadButton > button:hover {
-    background: #075985;
-    border-color: #075985;
+[data-testid="stPopoverBody"] .stDownloadButton > button:hover,
+div[data-baseweb="popover"] .stDownloadButton > button:hover {
+    background: var(--c-bg);
+    border-color: var(--c-accent);
+}
+.download-popover-hint {
+    color: var(--c-muted);
+    font-size: 11.5px;
+    margin: 0 0 6px 0;
+    line-height: 1.4;
+}
+.download-popover-sub {
+    color: var(--c-muted);
+    font-size: 11px;
+    margin: -2px 0 6px 2px;
+    line-height: 1.4;
 }
 </style>
 """
 
 
 def render(verdicts: pd.DataFrame) -> None:
-    """Download a deficiency CSV containing all non-GREEN segments."""
+    """Render the rail CTA: popover with CSV and HTML download options."""
     from src.report import DEFICIENCY_FIELDS
 
     bad = (
         verdicts[verdicts["verdict"] != "GREEN"][list(DEFICIENCY_FIELDS)]
-        .sort_values(["fcp_name", "length_m"], ascending=[True, False])
+        .sort_values(
+            ["fcp_name", "length_m"], ascending=[True, False]
+        )
     )
-    # Label kept short (no segment count) so it stays one line and
-    # matches the height of the adjacent "Ask QC bot" CTA.
-    st.download_button(
+
+    with st.popover(
         "Download deficiency report",
-        data=bad.to_csv(index=False).encode("utf-8"),
-        file_name="deficiency.csv",
-        mime="text/csv",
-        key="download_deficiency",
         use_container_width=True,
-    )
+    ):
+        st.markdown(
+            "<div class='download-popover-hint'>"
+            "Pick a format for the deficiency list."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.download_button(
+            "Raw CSV data",
+            data=bad.to_csv(index=False).encode("utf-8"),
+            file_name="deficiency.csv",
+            mime="text/csv",
+            key="download_deficiency_csv",
+            use_container_width=True,
+        )
+        st.markdown(
+            "<div class='download-popover-sub'>"
+            "Full field set for the reviewer's spreadsheet."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.download_button(
+            "Field report (HTML — print to PDF)",
+            data=_render_field_html(bad).encode("utf-8"),
+            file_name="deficiency-report.html",
+            mime="text/html",
+            key="download_deficiency_html",
+            use_container_width=True,
+        )
+        st.markdown(
+            "<div class='download-popover-sub'>"
+            "Plain-language punch list. Open in a browser, then "
+            "File → Print → Save as PDF."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+
+# ---- Field-friendly HTML rendering -------------------------------------
+
+_VERDICT_LABEL: dict[str, str] = {
+    "RED": "Needs review",
+    "YELLOW": "Warning",
+    "GREEN": "Passing",
+}
+
+
+def _humanize_reason(reason: str) -> str:
+    """Translate the most common jargon in a single reason string into
+    plain English. Unknown reasons pass through verbatim — we never
+    silently hide information the inspector might need."""
+    r = reason.strip()
+    if not r:
+        return r
+    subs: list[tuple[str, str]] = [
+        ("personal_data_visible",
+         "personal data visible in photo (needs re-shoot)"),
+        ("latlon_vs_address_disagree",
+         "photo GPS does not match the printed address"),
+        ("off_cluster",
+         "photo location is far from other photos of this section"),
+        ("relevance=portrait",
+         "photo is mostly a person, not the trench"),
+        ("relevance=off_topic",
+         "photo is not of the trench"),
+        ("relevance=unreadable",
+         "photo could not be read (blurry or too dark)"),
+        ("max gap", "gap without any photos"),
+        ("snap_distance=", "photo is off the trench centreline by "),
+    ]
+    for needle, plain in subs:
+        if needle in r:
+            r = r.replace(needle, plain)
+    return r
+
+
+def _humanize_reasons(reasons_field: str) -> str:
+    """Split the semicolon-joined reasons and humanize each."""
+    if not reasons_field:
+        return "No specific issue recorded — please re-check on site."
+    parts = [p for p in (s.strip() for s in reasons_field.split(";")) if p]
+    return "; ".join(_humanize_reason(p) for p in parts)
+
+
+_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Deficiency report — on-site punch list</title>
+<style>
+  @page {{ size: A4; margin: 18mm 14mm; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #111;
+    margin: 0;
+    line-height: 1.45;
+    font-size: 14px;
+  }}
+  h1 {{ font-size: 22px; margin: 0 0 4px 0; }}
+  .sub {{ color: #555; font-size: 13px; margin-bottom: 18px; }}
+  .row {{
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+  }}
+  .head {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }}
+  .ref {{ font-weight: 700; font-size: 15px; }}
+  .pill {{
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+  }}
+  .pill.red {{ background: #b91c1c; }}
+  .pill.yellow {{ background: #b45309; }}
+  .meta {{
+    color: #444;
+    font-size: 12.5px;
+    margin-bottom: 6px;
+  }}
+  .meta strong {{ color: #111; }}
+  .why {{
+    background: #f5f3ef;
+    border-left: 3px solid #444;
+    padding: 6px 10px;
+    font-size: 13px;
+    border-radius: 0 4px 4px 0;
+  }}
+  .empty {{
+    color: #15803d;
+    font-weight: 600;
+    padding: 16px;
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    background: #f0fdf4;
+  }}
+  .legend {{
+    font-size: 12px;
+    color: #555;
+    margin-top: 16px;
+    line-height: 1.7;
+  }}
+  @media print {{
+    .row {{ border-color: #888; }}
+  }}
+</style>
+</head>
+<body>
+<h1>Deficiency report</h1>
+<div class="sub">Sections that did not pass automated photo checks.
+Bring this to the trench; tick each entry as you re-do or re-shoot.</div>
+{rows_html}
+<div class="legend">
+  <strong>Severity:</strong>
+  <span class="pill red">Needs review</span>
+  — not enough good photos to confirm the work is OK.
+  &nbsp;
+  <span class="pill yellow">Warning</span>
+  — some checks missed but section is mostly covered.
+</div>
+</body>
+</html>
+"""
+
+
+def _render_field_html(bad: pd.DataFrame) -> str:
+    """Build the print-friendly HTML document for the crew."""
+    if bad.empty:
+        rows_html = (
+            "<div class='empty'>"
+            "All sections passed — nothing to flag."
+            "</div>"
+        )
+        return _HTML_TEMPLATE.format(rows_html=rows_html)
+
+    cards: list[str] = []
+    for r in bad.to_dict("records"):
+        verdict_raw = str(r.get("verdict") or "").upper()
+        pill_class = verdict_raw.lower()
+        label = _VERDICT_LABEL.get(verdict_raw, verdict_raw.title())
+
+        seg_id = str(r.get("segment_id") or "")
+        short = seg_id.rsplit("_", 1)[-1] if "_" in seg_id else seg_id
+        fcp = html.escape(str(r.get("fcp_name") or "—"))
+
+        length_raw = r.get("length_m")
+        try:
+            length_str = f"{float(length_raw):.0f} m"
+        except (TypeError, ValueError):
+            length_str = "—"
+
+        photos = r.get("photo_count") or 0
+        ok_photos = r.get("compliant_photo_count") or 0
+
+        reasons_raw = r.get("reasons") or ""
+        why = html.escape(_humanize_reasons(str(reasons_raw)))
+
+        cards.append(
+            "<div class='row'>"
+            "<div class='head'>"
+            f"<span class='ref'>Section {html.escape(short)} "
+            f"&middot; {fcp}</span>"
+            f"<span class='pill {pill_class}'>"
+            f"{html.escape(label)}</span>"
+            "</div>"
+            "<div class='meta'>"
+            f"Length <strong>{length_str}</strong> &middot; "
+            f"Photos <strong>{ok_photos}/{photos}</strong> "
+            "passing checks"
+            "</div>"
+            f"<div class='why'>{why}</div>"
+            "</div>"
+        )
+
+    return _HTML_TEMPLATE.format(rows_html="\n".join(cards))

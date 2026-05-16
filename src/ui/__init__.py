@@ -8,7 +8,7 @@ Typical usage in `app.py`:
     from src.ui import inject_all_css, layout
     from src.ui.components import (
         topbar, hero, demo_tour, map_view,
-        worst_list, catches, download, segment_panel,
+        catches, download, segment_panel,
     )
 
     inject_all_css()
@@ -36,7 +36,6 @@ from .components import (
     map_view,
     segment_panel,
     topbar,
-    worst_list,
 )
 
 
@@ -55,7 +54,6 @@ def inject_all_css() -> None:
         hero.CSS,
         demo_tour.CSS,
         map_view.CSS,
-        worst_list.CSS,
         catches.CSS,
         download.CSS,
         segment_panel.CSS,
@@ -71,7 +69,6 @@ __all__ = [
     "hero",
     "demo_tour",
     "map_view",
-    "worst_list",
     "catches",
     "download",
     "segment_panel",

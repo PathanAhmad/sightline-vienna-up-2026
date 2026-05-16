@@ -44,7 +44,6 @@ from src.ui import (
     map_view,
     segment_panel,
     topbar,
-    worst_list,
 )
 from src.ui.components.hero import HeroStats
 
@@ -320,7 +319,6 @@ def main() -> None:
             demo_tour.render(
                 verdicts_by_segment, geomatch, readqc, forensics,
             )
-            worst_list.render(verdicts, limit=6)
             catches.render(stats)
             # Download + Ask sit on one 50/50 row -- two primary actions
             # framed as a pair instead of stacking the chat under the CTA.
