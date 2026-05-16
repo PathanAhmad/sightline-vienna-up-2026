@@ -26,3 +26,6 @@ scripts/out/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# Sphinx build output
+docs/_build/
