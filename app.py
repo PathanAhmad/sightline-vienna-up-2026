@@ -518,8 +518,17 @@ def main() -> None:
             if st.button("← Back to overview",
                          key="back_to_rail",
                          use_container_width=True):
+                # Pop selected_segment but KEEP _last_map_click_seg.
+                # st_folium replays the last click payload on every
+                # rerun -- if we cleared _last_map_click_seg too, the
+                # click-handler above would re-select the same segment
+                # on the very next rerun and the back button would
+                # "do nothing" (panel re-opens instantly). Side effect:
+                # to re-open the same segment after dismissing, click a
+                # different segment first. Acceptable wart -- the
+                # alternative is rebuilding the map iframe (losing
+                # pan/zoom state) on every dismiss.
                 st.session_state.pop("selected_segment", None)
-                st.session_state.pop("_last_map_click_seg", None)
                 st.rerun()
             live_uploads_by_id = {
                 u["photo_id"]: u for u in upload_state
