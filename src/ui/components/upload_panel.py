@@ -296,11 +296,16 @@ def _process_pending(uploaded_files: list[Any]) -> None:
     state[:] = [u for u in state if u.get("_source") in keep_sources]
 
     # First pass: detect lot bundles. If multiple are uploaded, the LAST
-    # one wins (most recent intent). Loading a new lot invalidates prior
-    # uploads -- they snapped against a different set of trenches -- so
-    # we clear the upload state when the session_lot changes.
+    # one wins (most recent intent). We cache extracted bundles per
+    # source filename -- `extract_lot_bundle` calls `tempfile.mkdtemp()`
+    # which returns a *new* path every call, so without this cache the
+    # `prior != new` change-detector below would fire on every rerun,
+    # wiping the upload state and leaking a fresh /tmp dir each time.
     # Bundle messages are (source_name, message, level) where level is
     # "info" (lot loaded) or "error" (extraction failed).
+    bundle_cache: dict[str, lot_bundle.LotBundle] = (
+        st.session_state.setdefault("_extracted_lot_cache", {})
+    )
     bundle_msgs: list[tuple[str, str, str]] = []
     bundle_photos: list[tuple[str, bytes, str]] = []
     lot_sources: set[str] = set()
@@ -309,14 +314,17 @@ def _process_pending(uploaded_files: list[Any]) -> None:
         raw = f.getvalue()
         if not lot_bundle.is_lot_bundle(f.name, raw):
             continue
-        bundle = lot_bundle.extract_lot_bundle(f.name, raw)
+        bundle = bundle_cache.get(f.name)
         if bundle is None:
-            bundle_msgs.append((
-                f.name,
-                "bundle looked valid but failed to extract",
-                "error",
-            ))
-            continue
+            bundle = lot_bundle.extract_lot_bundle(f.name, raw)
+            if bundle is None:
+                bundle_msgs.append((
+                    f.name,
+                    "bundle looked valid but failed to extract",
+                    "error",
+                ))
+                continue
+            bundle_cache[f.name] = bundle
         new_session_lot = {
             "lot_id": bundle.lot_id,
             "trenches_path": str(bundle.trenches_path),
@@ -344,15 +352,20 @@ def _process_pending(uploaded_files: list[Any]) -> None:
 
     if new_session_lot is not None:
         prior = st.session_state.get("session_lot")
-        if not prior or prior.get("trenches_path") != new_session_lot["trenches_path"]:
+        prior_source = prior.get("source_name") if prior else None
+        if prior_source != new_session_lot["source_name"]:
             # Lot changed -- prior uploads / scores belong to a different
-            # trench set, so wipe them out.
+            # trench set. Wipe them and force a fresh rerun so app.py
+            # rebuilds geom_handle against the new lot BEFORE we try to
+            # snap any photos. Without the rerun, geom_for_snap below is
+            # the old lot's handle and bundle photos enter `state` with
+            # snap=None, then the dedup guard prevents them from being
+            # re-snapped on the next rerun -- they'd stay forever as
+            # "no GPS" rows even though we have their coords.
             st.session_state["session_lot"] = new_session_lot
             st.session_state["dashboard_uploads"] = []
             st.session_state["dashboard_score_cache"] = {}
-            state = _ensure_state()
-            cache = _score_cache()
-            geom_for_snap = None  # app.py will rebuild on next render
+            st.rerun()
 
     # Expand each upload into (display_name, bytes, source_name) tuples.
     # Lot bundles are handled separately above -- skip them in this loop.
