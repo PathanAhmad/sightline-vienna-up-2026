@@ -27,7 +27,7 @@ A tool that does that review automatically and produces a colored map of the wor
 
 The user clicks any segment on the map and sees the actual photos, plus a plain-English list of what's wrong ("no compliant photo between meter 12 and meter 31 of this 47-meter stretch"; "this photo was already submitted on job #X").
 
-For our pilot, we ran it on **3,929 photos** from a real fiber-trench project in Maria Rain, Carinthia. Total cost: about **$15** in AI fees. Total time: **under 30 minutes**.
+For our pilot, we ran it on **3,929 photos** from a real Carinthian fiber-trench project. Total cost: about **$15** in AI fees. Total time: **under 30 minutes**.
 
 ## 3. The two screens
 
@@ -41,23 +41,28 @@ An office reviewer at APG opens the dashboard and sees the colored map of the wh
 
 Both screens are the same app — you just put `?view=upload` at the end of the web address to flip between them.
 
-## 4. The eight things we check on every photo
+## 4. The eight checks every photo gets
 
-We send each unique photo to **Claude** (the AI we use — same family of AI as ChatGPT but made by Anthropic). Claude looks at the photo and answers eight yes/no/unclear questions:
+Each photo is run against eight compliance checks. Six are answered by **Claude** (the AI we use — same family as ChatGPT, made by Anthropic). Two are answered without AI, by simple comparisons.
+
+The six Claude looks at:
 
 1. **Is the orange warning tape visible?** (The tape that tells a future digger "stop, cable below.")
 2. **Is sand visible underneath the cable?** (Cables on bare dirt get damaged. Sand is the cushion.)
 3. **Is this a side view of the trench?** (You can't judge depth from a top-down photo.)
 4. **Is there a depth reference visible?** (A measuring rod or ruler in the frame, so you can actually see how deep the trench is.)
-5. **Is the cable bundle visible, and are its ends sealed?** (Open cable ends let water in. White caps = sealed.)
+5. **Are the cable ends sealed?** (Open cable ends let water in. White end-caps on the duct bundle = sealed.)
 6. **Are there any people's faces or license plates visible?** (European privacy law — we have to flag these.)
-7. **What stage of the work is this photo from?** (Just-dug? Cable laid? Filled back in? We don't penalize a "cable laid" photo for missing the warning tape — the tape goes on later.)
-8. **Is this photo even relevant?** (Sometimes contractors upload selfies, photos of paperwork, or pictures of their lunch. Those get filed under "not classified" and don't hurt anyone's score.)
 
-Plus two checks Claude doesn't do — we handle them separately:
+The two we handle without AI:
 
-9. **Have we seen this exact photo before?** Computers can compare images very cheaply. We check every photo against every other photo and flag matches. (This caught about **600 duplicates** in our pilot dataset — photos a contractor had submitted to multiple jobs.)
-10. **Does this photo come from where it says it comes from?** Most photos have the GPS coordinates and street address printed right on them (the contractors' camera apps stamp this in). We compare the two and flag anything where the GPS says one village and the address says another.
+7. **Have we seen this exact photo before?** Computers can compare images very cheaply. We check every photo against every other photo and flag matches. (This caught about **600 duplicates** in our pilot dataset — photos a contractor had submitted to multiple jobs.)
+8. **Does this photo come from where it says it comes from?** Most photos have the GPS coordinates and street address printed right on them (the contractors' camera apps stamp this in). We compare the two and flag anything where the GPS says one village and the address says another.
+
+Before any of those eight even run, every photo passes through two **filters** that decide whether the checks apply at all:
+
+- **Is this photo relevant?** Sometimes contractors upload selfies, photos of paperwork, or pictures of their lunch. Those get filed under "not classified" and don't hurt anyone's score.
+- **What stage of work is this?** Just-dug trench? Cable laid? Sand poured? Filled back in? We don't penalize a "cable laid" photo for missing the warning tape — the tape goes on later, in a different photo. Each check only applies to the stages where it makes sense.
 
 ## 5. How a stretch of trench gets its color
 
@@ -69,7 +74,7 @@ The trench network is split into **2,983 short stretches** (a typical one is aro
 4. **Assign a color:**
    - **GREEN** — photos every 5 meters or better, all of them pass the checks.
    - **YELLOW** — photos exist but there's a gap bigger than 5 meters, or some photo failed a check.
-   - **RED** — almost no photos, or none at all.
+   - **RED** — fewer than one photo every 10 meters, or no photos at all.
 
 A photo only counts toward the "every 5 meters" rule if it passed all the per-photo checks (sand visible, tape visible, etc., for whichever checks apply to its stage of work). A photo of a paper label, or a portrait of the contractor, doesn't fill the gap.
 
@@ -79,7 +84,7 @@ These three are the "wow" moments — the kinds of things a human reviewer would
 
 - **Reused photos.** Someone took a nice photo of a well-laid cable once, and has been submitting it to every job for six months. The tool spots it because the photo's "fingerprint" matches one we've already seen. We catch the original, the copy, and which jobs each one was submitted to.
 - **Wrong location.** Someone took a real photo, but the location it's tagged with is somewhere else (sometimes by accident, sometimes not). The tool catches it because the GPS coordinates and the printed address disagree, or because both of them land outside the project area entirely.
-- **Privacy violations.** A worker's face or a car license plate is in the photo. European law (NIS2) says we have to handle these carefully. The tool flags them, hides the image in the on-screen grid (replaces it with a "GDPR notice" card), and puts them in a "needs retake" list.
+- **Privacy violations.** A worker's face or a car license plate is in the photo. European law (NIS2 is the cybersecurity rule; GDPR is the personal-data rule) says we have to handle these carefully. The tool flags them, hides the image in the on-screen grid (replaces it with a short privacy-notice card), and puts them in a "needs retake" list.
 
 ## 7. What we deliberately don't do
 
@@ -99,7 +104,7 @@ A few decisions worth knowing because judges may ask:
 
 ## 9. The numbers from our pilot
 
-Run on the Maria Rain dataset that APG's partner gave us:
+Run on the Carinthian pilot dataset that APG's partner gave us:
 
 - **3,929 photos** ingested.
 - **~600 duplicates** caught automatically (the dataset had hidden ground-truth markers we could check against).
