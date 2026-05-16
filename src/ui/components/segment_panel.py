@@ -235,8 +235,15 @@ def render(
     rep_by_cluster: dict[Any, str],
     manifest: dict,
     photos_root: Path,
+    live_uploads_by_id: dict[str, dict] | None = None,
 ) -> None:
-    """Render the segment detail panel for the given segment_id."""
+    """Render the segment detail panel for the given segment_id.
+
+    `live_uploads_by_id` maps a `live_XXX` photo_id to its upload entry
+    (carries the in-memory image bytes). When the iterator hits a photo
+    whose id isn't in the on-disk manifest but IS in this dict, we
+    render the upload bytes instead of the "image unavailable" stub.
+    """
     v = verdicts_by_segment.get(seg_id)
     if v is None:
         st.warning(f"Segment {seg_id} not found in verdicts.")
@@ -310,8 +317,26 @@ def render(
                     continue
 
                 img_path = _photo_path_for(pid, manifest, photos_root)
+                live_entry = (
+                    live_uploads_by_id.get(pid)
+                    if live_uploads_by_id else None
+                )
                 if img_path:
                     st.image(str(img_path), width="stretch")
+                elif live_entry and live_entry.get("image"):
+                    # In-memory upload -- render the bytes directly. Also
+                    # tag the source so the operator can tell this photo
+                    # came from their just-dropped batch, not the batch
+                    # pipeline.
+                    st.image(live_entry["image"], width="stretch")
+                    st.markdown(
+                        f"<div style='font-size:10px;color:var(--c-accent);"
+                        f"font-weight:600;letter-spacing:0.06em;"
+                        f"text-transform:uppercase;margin-top:2px;'>"
+                        f"Live upload &middot; {live_entry.get('name','')}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
                 else:
                     st.markdown(
                         f"<div style='background:var(--c-bg);"

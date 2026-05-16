@@ -369,11 +369,44 @@ def main() -> None:
             qc_to_geomatch_row(u["photo_id"], u.get("lat"), u.get("lon"), u.get("snap"))
         )
 
+    # Snapshot baseline verdicts BEFORE the merge so we can diff and tell
+    # the operator exactly which segments their batch moved -- the rail's
+    # "Δ this batch" summary reads from this.
+    baseline_verdict_by_seg: dict[str, str] = {
+        r["segment_id"]: r["verdict"]
+        for r in verdicts.to_dict("records")
+    }
+
     if upload_readqc and geom_handle is not None:
         verdicts, geomatch, readqc, forensics = recompute_verdicts(
             verdicts, geomatch, readqc, forensics,
             upload_geomatch, upload_readqc, geom_handle,
         )
+
+    # Compute the post-merge transitions for affected segments. Only
+    # segments whose uploads snapped to them can change verdict.
+    affected_segments = {
+        ug["segment_id"] for ug in upload_geomatch if ug.get("segment_id")
+    }
+    verdict_after_by_seg = {
+        r["segment_id"]: r["verdict"] for r in verdicts.to_dict("records")
+    }
+    delta_counts: dict[str, int] = {}
+    changed_segment_ids: list[str] = []
+    for seg_id in affected_segments:
+        before = baseline_verdict_by_seg.get(seg_id, "RED")
+        after = verdict_after_by_seg.get(seg_id, before)
+        if before != after:
+            delta_counts[f"{before}→{after}"] = (
+                delta_counts.get(f"{before}→{after}", 0) + 1
+            )
+            changed_segment_ids.append(seg_id)
+
+    # Stash for the rail's Δ-summary panel + the "fly to changes" button.
+    # Upload panel reads from session_state so we don't have to thread two
+    # more parameters through render().
+    st.session_state["_dashboard_delta_counts"] = delta_counts
+    st.session_state["_dashboard_changed_segments"] = changed_segment_ids
 
     readqc_by_id = {r["photo_id"]: r for r in readqc}
     forensics_by_id = {r["photo_id"]: r for r in forensics}
@@ -420,9 +453,26 @@ def main() -> None:
          "tooltip": name_by_pid.get(r["photo_id"], "uploaded photo")}
         for r in upload_geo[["lat", "lon", "photo_id"]].to_dict("records")
     ]
+    # One-shot fly-to: rail's "Fly to changes" button sets a flag, we
+    # pop it here and compute a bounding box around the upload photos
+    # (and a fallback to the changed segments if no GPS-bearing uploads
+    # exist). map_view re-fits the leaflet view to those bounds for
+    # exactly one render; user pans / zooms own the view after that.
+    focus_bounds = None
+    if st.session_state.pop("_fly_to_uploads", False):
+        upload_latlons = [
+            (u["lat"], u["lon"]) for u in upload_state
+            if u.get("lat") is not None and u.get("lon") is not None
+        ]
+        if upload_latlons:
+            lats = [p[0] for p in upload_latlons]
+            lons = [p[1] for p in upload_latlons]
+            focus_bounds = ((min(lats), min(lons)), (max(lats), max(lons)))
+
     m = map_view.build_map(
         trenches, fcps, cluster, verdicts_by_segment, photo_points,
         upload_points=upload_points,
+        focus_bounds=focus_bounds,
     )
     with map_col:
         click = st_folium(
@@ -471,6 +521,10 @@ def main() -> None:
                 st.session_state.pop("selected_segment", None)
                 st.session_state.pop("_last_map_click_seg", None)
                 st.rerun()
+            live_uploads_by_id = {
+                u["photo_id"]: u for u in upload_state
+                if u.get("qc") is not None and not u.get("err")
+            }
             segment_panel.render(
                 selected,
                 verdicts_by_segment,
@@ -480,6 +534,7 @@ def main() -> None:
                 rep_by_cluster,
                 manifest,
                 paths.photos_root,
+                live_uploads_by_id=live_uploads_by_id,
             )
 
 

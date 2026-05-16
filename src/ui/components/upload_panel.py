@@ -176,6 +176,74 @@ CSS = """
 .rail-result .seg b { color: var(--c-text); }
 .rail-result .right { margin-left: auto; }
 
+/* Δ-this-batch panel -- shows verdict transitions caused by the upload
+   so the operator sees "your photos moved 3 segments" instead of having
+   to hunt for tiny colour changes in a sea of red trenches. */
+.rail-delta {
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-left: 3px solid var(--c-accent);
+    border-radius: var(--r-sm);
+    padding: 8px 10px 6px 12px;
+    margin: 6px 0 8px 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+}
+.rail-delta .head {
+    font-size: 9.5px;
+    font-weight: 700;
+    color: var(--c-muted);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.rail-delta .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 2px;
+}
+.rail-delta .pair {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-variant-numeric: tabular-nums;
+}
+.rail-delta .swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    vertical-align: middle;
+}
+.rail-delta .swatch.green  { background: var(--c-green); }
+.rail-delta .swatch.yellow { background: var(--c-yellow); }
+.rail-delta .swatch.red    { background: var(--c-red); }
+.rail-delta .arrow {
+    color: var(--c-muted);
+    margin: 0 2px;
+}
+.rail-delta .none {
+    color: var(--c-muted);
+    font-style: italic;
+}
+
+/* Fly-to-changes button -- accent-colored, full-width. */
+.st-key-rail_fly_btn .stButton > button {
+    background: var(--c-accent) !important;
+    color: white !important;
+    border: 1px solid var(--c-accent) !important;
+    min-height: 28px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    margin-top: 2px;
+}
+.st-key-rail_fly_btn .stButton > button:hover {
+    background: #075985 !important;
+    color: white !important;
+    border-color: #075985 !important;
+}
+
 /* Loaded-lot banner (only shown when a contractor bundle is active). */
 .loaded-lot-banner {
     background: var(--c-accent-soft);
@@ -443,6 +511,13 @@ def _process_pending(uploaded_files: list[Any]) -> None:
         )
         progress.progress(i / n, text=f"Scoring {i} / {n} …")
     progress.empty()
+    # Force a rerun so app.py picks up the newly-scored uploads, merges
+    # them into the verdicts/photo_points lists, and the map redraws
+    # with the new orange dots + recolored segments. Without this the
+    # script ends here and the map keeps the *pre-scoring* snapshot --
+    # the user only sees the recolor after some other interaction
+    # triggers a rerun.
+    st.rerun()
 
 
 def _build_entry(
@@ -481,6 +556,67 @@ def _build_entry(
         "lon": lon,
         "snap": snap,
     }
+
+
+_VERDICT_CSS = {"GREEN": "green", "YELLOW": "yellow", "RED": "red"}
+
+
+def _render_delta_panel() -> None:
+    """Verdict-transition summary + 'Fly to changes' button.
+
+    Reads `_dashboard_delta_counts` / `_dashboard_changed_segments` from
+    session_state (populated by app.py after the in-memory recompute).
+    Renders nothing when there are no uploads or no changes -- the
+    operator doesn't need to see an empty panel.
+    """
+    delta: dict[str, int] = st.session_state.get(
+        "_dashboard_delta_counts", {}
+    )
+    changed: list[str] = st.session_state.get(
+        "_dashboard_changed_segments", []
+    )
+    has_uploads = bool(st.session_state.get("dashboard_uploads", []))
+    if not has_uploads:
+        return
+
+    # Group transitions by direction. The dict keys look like "RED→YELLOW".
+    if delta:
+        pair_html: list[str] = []
+        for label, n in sorted(delta.items(), key=lambda kv: -kv[1]):
+            before, after = label.split("→")
+            pair_html.append(
+                f"<span class='pair'><b>{n}</b>"
+                f"<span class='swatch {_VERDICT_CSS.get(before,'')}'></span>"
+                f"<span class='arrow'>→</span>"
+                f"<span class='swatch {_VERDICT_CSS.get(after,'')}'></span>"
+                f"</span>"
+            )
+        body_html = "<div class='row'>" + " ".join(pair_html) + "</div>"
+    else:
+        body_html = (
+            "<div class='none'>"
+            "Photos scored, no segment crossed a threshold yet."
+            "</div>"
+        )
+
+    st.markdown(
+        f"<div class='rail-delta'>"
+        f"<div class='head'>&Delta; this batch &middot; "
+        f"{len(changed)} segment(s) changed</div>"
+        f"{body_html}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    if st.button(
+        "Fly to changes",
+        key="rail_fly_btn",
+        use_container_width=True,
+        disabled=not bool(changed) and not has_uploads,
+        help="Pan and zoom the map to fit your batch's footprint.",
+    ):
+        st.session_state["_fly_to_uploads"] = True
+        st.rerun()
 
 
 def _render_result_rows(uploads: list[dict]) -> None:
@@ -619,6 +755,7 @@ def render(geom_handle: dict | None) -> None:
             html = _summary_bar_html(uploads)
             if html:
                 st.markdown(html, unsafe_allow_html=True)
+            _render_delta_panel()
             _render_result_rows(uploads)
             # Clear-button row -- right-aligned via a tiny column trick.
             _, clear_col = st.columns([3, 1])

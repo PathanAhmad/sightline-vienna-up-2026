@@ -41,6 +41,7 @@ def build_map(
     verdicts_by_segment: dict[str, dict],
     photo_points: list[dict],
     upload_points: list[dict] | None = None,
+    focus_bounds: tuple[tuple[float, float], tuple[float, float]] | None = None,
 ) -> folium.Map:
     """Build the folium map. Each trench feature carries its verdict in
     properties so the click handler can read it back without a roundtrip.
@@ -152,6 +153,20 @@ def build_map(
     upload_layer.add_to(m)
 
     folium.LayerControl(collapsed=True).add_to(m)
+
+    # One-shot fit_bounds — used by the rail's "Fly to changes" button.
+    # The caller pops the session flag before passing this in, so the
+    # auto-fit only happens on the rerun triggered by the click.
+    if focus_bounds is not None:
+        (s_lat, s_lon), (n_lat, n_lon) = focus_bounds
+        # Pad a touch so the markers don't sit flush against the edge.
+        pad_lat = max((n_lat - s_lat) * 0.25, 0.0005)
+        pad_lon = max((n_lon - s_lon) * 0.25, 0.0005)
+        m.fit_bounds([
+            [s_lat - pad_lat, s_lon - pad_lon],
+            [n_lat + pad_lat, n_lon + pad_lon],
+        ])
+
     return m
 
 
