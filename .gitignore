@@ -17,6 +17,7 @@ scripts/out/
 
 # Local MCP config — contains API keys, never commit
 .mcp.json
+mcp.json
 
 # Anthropic / partner keys live here, never commit
 .env

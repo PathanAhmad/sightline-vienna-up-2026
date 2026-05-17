@@ -561,7 +561,13 @@ def main() -> None:
     valid_geo = geomatch[geomatch["lat"].notna() & geomatch["lon"].notna()]
     base_geo = valid_geo[~valid_geo["photo_id"].isin(upload_pids)]
     upload_geo = valid_geo[valid_geo["photo_id"].isin(upload_pids)]
-    photo_points = base_geo[["lat", "lon"]].to_dict("records")
+    # Drop off_cluster pins -- those are either OCR-garbled overlay GPS or
+    # a Nominatim wrong-city hit, and they spray dots tens of km outside
+    # the project area. The upstream parser bounds + geocoder viewbox stop
+    # new ones from landing in geomatch.csv, but rows written before those
+    # fixes still need to be hidden from the map.
+    base_on_cluster = base_geo[base_geo["fcp_assignment"] != "off_cluster"]
+    photo_points = base_on_cluster[["lat", "lon"]].to_dict("records")
     name_by_pid = {u["photo_id"]: u["name"] for u in upload_state}
     upload_points = [
         {"lat": r["lat"], "lon": r["lon"],

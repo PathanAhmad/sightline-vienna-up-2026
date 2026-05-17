@@ -80,10 +80,59 @@ PRICING = {
 }
 
 EXEMPLARS = [
-    ("bad",        EXEMPLARS_DIR / "bad.jpeg",        "Junk / non-scorable -- bad reference."),
-    ("duct_sand",  EXEMPLARS_DIR / "duct_sand.jpg",   "Duct laid with visible sand bedding -- phase=sand_bedded."),
-    ("duct_depth", EXEMPLARS_DIR / "duct_depth.jpg",  "Duct with measuring rod showing trench depth -- phase=depth_measure."),
-    ("warnband",   EXEMPLARS_DIR / "warnband.jpeg",   "Yellow/red warning tape laid above duct -- phase=tape_laid."),
+    # --- Original 4 (kept; captions tightened where needed) ---
+    ("bad_lowlight_label", EXEMPLARS_DIR / "bad.jpeg",
+     "Paper FCP label photographed in poor lighting -- phase=paper_label "
+     "(label fills frame, no other work visible)."),
+    ("duct_sand", EXEMPLARS_DIR / "duct_sand.jpg",
+     "Duct laid in trench with visible sand bedding -- phase=sand_bedded."),
+    ("duct_depth_rod_prominent", EXEMPLARS_DIR / "duct_depth.jpg",
+     "Trench with prominent measuring rod composition AND duct visible at "
+     "bottom -- phase=depth_measure. APG labels rod-prominent frames as "
+     "depth_measure even when ducts are also present; the rod composition "
+     "is the documented activity."),
+    ("warnband", EXEMPLARS_DIR / "warnband.jpeg",
+     "Yellow/red warning tape laid above duct -- phase=tape_laid."),
+
+    # --- 10 new exemplars added to teach the gaps the bench exposed ---
+    # Paper-label vs duct disambiguation (was the largest single failure mode:
+    # 11 of 100 duct/ photos misclassified as paper_label by Sonnet/Haiku).
+    ("duct_with_label_1", EXEMPLARS_DIR / "duct_with_label_1.jpg",
+     "Trench with red duct laid and a paper FCP label visible against the "
+     "trench wall -- phase=duct_laid. The label is supporting documentation "
+     "of WHICH duct; the work phase is duct laying, not paper_label."),
+    ("duct_with_label_2", EXEMPLARS_DIR / "duct_with_label_2.jpg",
+     "Long trench with duct visible and paper FCP label at the bottom of "
+     "frame -- phase=duct_laid. Label is metadata; duct work is the subject."),
+    ("paper_label_closeup", EXEMPLARS_DIR / "paper_label_closeup.jpg",
+     "Paper FCP label held up as a close-up document, no active work phase "
+     "visible behind -- phase=paper_label (true label-only shot)."),
+
+    # Clean unambiguous cases for the two bench classes.
+    ("rod_only_depth", EXEMPLARS_DIR / "rod_only_depth.jpg",
+     "Empty trench with measuring rod only -- phase=depth_measure (clean "
+     "case, no ducts in frame)."),
+    ("clean_duct", EXEMPLARS_DIR / "clean_duct.jpg",
+     "Duct laid in open trench, no measuring rod, no sand, no tape -- "
+     "phase=duct_laid (clean case)."),
+
+    # Phases the original 4 didn't cover.
+    ("excavation", EXEMPLARS_DIR / "excavation.jpg",
+     "Open empty trench, nothing laid yet -- phase=excavation."),
+    ("restored", EXEMPLARS_DIR / "restored.jpg",
+     "Fresh asphalt patch over a former trench line, surface restoration "
+     "complete -- phase=restored."),
+    ("tape_clean", EXEMPLARS_DIR / "tape_clean.jpg",
+     "Backfilled trench with yellow 'ACHTUNG' warning tape laid on top -- "
+     "phase=tape_laid (top-down view, no duct or rod in frame)."),
+    ("sand_clean", EXEMPLARS_DIR / "sand_clean.jpg",
+     "Duct bundle bedded in clean light-colored sand fill -- "
+     "phase=sand_bedded."),
+
+    # Relevance-gate example.
+    ("offtopic", EXEMPLARS_DIR / "offtopic.jpg",
+     "Generic street scene with parked van and signage; no trench or fiber "
+     "work in frame -- relevance=off_topic."),
 ]
 
 SYSTEM_INSTRUCTIONS = """\
@@ -103,7 +152,7 @@ phase -- what stage of work the photo documents. **When multiple phases are visi
   excavation -> depth_measure -> duct_laid -> sand_bedded -> tape_laid -> backfilled -> restored
 
   Plus three non-progression buckets:
-  paper_label    -- A paper FCP label (e.g. "F012-R001-7-br") held up to the camera dominates the frame. Use this even if a trench is also visible.
+  paper_label    -- A paper FCP label (e.g. "F012-R001-7-br") is the PRIMARY subject of the photo, filling most of the frame as a close-up document. Use this ONLY when the label dominates AND no active work phase (ducts in trench, sand bedding, warning tape, etc.) is clearly visible behind or alongside it. **If you see ducts laid in a trench with a paper label off to the side, on the wall, at the corner, or held over the duct bundle, the phase is duct_laid (or whichever later phase is shown) — the label is supporting metadata documenting WHICH duct/FCP, not the subject. Same rule for sand_bedded, tape_laid, etc.: the work phase wins over the label.**
   staging        -- Equipment / skip / dumpster / cones / parked truck on site; no trench-process work in frame.
   other          -- Genuinely doesn't fit any of the above.
 

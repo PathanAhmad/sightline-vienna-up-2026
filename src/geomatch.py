@@ -100,6 +100,17 @@ def _to_float(s: str) -> float:
     return float(s.replace(",", "."))
 
 
+def _valid_latlon(lat: float, lon: float) -> bool:
+    """Reject physically impossible coordinates.
+
+    OCR on the burned-in overlay sometimes drops or duplicates a digit
+    (e.g. "46.33..." becomes "6.33..." or "14.29..." becomes "449.45...").
+    Without this gate those values flow into the geomatch CSV and get
+    pinned on the dashboard map far from the project area.
+    """
+    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
+
+
 def parse_overlay_latlon(s: str | None) -> tuple[float, float] | None:
     """Return (lat, lon) decimal degrees, or None if unparseable.
 
@@ -125,7 +136,8 @@ def parse_overlay_latlon(s: str | None) -> tuple[float, float] | None:
                 val = -val
             coords["lat" if h in {"N", "S"} else "lon"] = val
         if "lat" in coords and "lon" in coords:
-            return (coords["lat"], coords["lon"])
+            if _valid_latlon(coords["lat"], coords["lon"]):
+                return (coords["lat"], coords["lon"])
 
     # Decimal-with-hemisphere first: 46.56153856N 14.28786228E
     dec_h = list(_DEC_HEMI_RE.finditer(text))
@@ -138,7 +150,8 @@ def parse_overlay_latlon(s: str | None) -> tuple[float, float] | None:
                 val = -val
             coords["lat" if h in {"N", "S"} else "lon"] = val
         if "lat" in coords and "lon" in coords:
-            return (coords["lat"], coords["lon"])
+            if _valid_latlon(coords["lat"], coords["lon"]):
+                return (coords["lat"], coords["lon"])
 
     # Labeled decimal: "Lat 46.55, Long 14.29" -- hemisphere inferred from label.
     dec_l = list(_DEC_LABELED_RE.finditer(text))
@@ -149,7 +162,8 @@ def parse_overlay_latlon(s: str | None) -> tuple[float, float] | None:
             key = "lat" if m.group("label").lower().startswith("lat") else "lon"
             coords[key] = val
         if "lat" in coords and "lon" in coords:
-            return (coords["lat"], coords["lon"])
+            if _valid_latlon(coords["lat"], coords["lon"]):
+                return (coords["lat"], coords["lon"])
 
     return None
 
@@ -172,14 +186,26 @@ def _save_cache(cache: dict[str, dict]) -> None:
     NOMINATIM_CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _nominatim_call(q: str) -> dict | None:
-    url = "https://nominatim.openstreetmap.org/search?" + urlencode({
+def _nominatim_call(
+    q: str,
+    viewbox: tuple[float, float, float, float] | None = None,
+) -> dict | None:
+    params: dict[str, str | int] = {
         "q": q,
         "format": "json",
         "limit": 1,
         "countrycodes": "at",
         "addressdetails": 1,
-    })
+    }
+    if viewbox is not None:
+        # Nominatim viewbox order is lon_min,lat_min,lon_max,lat_max.
+        # `bounded=1` makes it a hard filter instead of a ranking hint --
+        # ambiguous street names that exist in multiple Austrian cities
+        # were resolving to Vienna/Innsbruck without this.
+        lon_min, lat_min, lon_max, lat_max = viewbox
+        params["viewbox"] = f"{lon_min},{lat_min},{lon_max},{lat_max}"
+        params["bounded"] = 1
+    url = "https://nominatim.openstreetmap.org/search?" + urlencode(params)
     req = Request(url, headers={"User-Agent": NOMINATIM_USER_AGENT, "Accept-Language": "de,en"})
     with urlopen(req, timeout=20) as resp:
         data = json.loads(resp.read())
@@ -197,7 +223,11 @@ def _nominatim_call(q: str) -> dict | None:
 class Geocoder:
     """Cached forward-geocoder. Throttles uncached calls to 1.1s."""
 
-    def __init__(self, network_disabled: bool = False) -> None:
+    def __init__(
+        self,
+        network_disabled: bool = False,
+        viewbox: tuple[float, float, float, float] | None = None,
+    ) -> None:
         self.cache = _load_cache()
         self._last_call = 0.0
         # When True, cache hits are still used but uncached addresses
@@ -205,6 +235,10 @@ class Geocoder:
         # run a pipeline through when the public endpoint has us
         # rate-limited without polluting the cache with synthetic nulls.
         self.network_disabled = network_disabled
+        # Optional (lon_min, lat_min, lon_max, lat_max) WGS84 bounds --
+        # when set, Nominatim hard-filters results to this rectangle so
+        # ambiguous street names can't resolve to the wrong city.
+        self.viewbox = viewbox
 
     def __call__(self, address: str) -> dict | None:
         if not address:
@@ -219,7 +253,7 @@ class Geocoder:
         if wait > 0:
             time.sleep(wait)
         try:
-            result = _nominatim_call(key)
+            result = _nominatim_call(key, viewbox=self.viewbox)
         except Exception as e:
             # Throttle applies to failures too -- otherwise a 429 burst
             # makes us hammer Nominatim with rapid retries (1 req/sec
@@ -380,7 +414,16 @@ def main() -> int:
     for pid, cid in cluster_of_photo.items():
         photos_in_cluster.setdefault(cid, []).append(pid)
 
-    geocoder = Geocoder(network_disabled=args.no_geocode)
+    # Pad the cluster bbox by ~0.15° (~11 km lat, ~12 km lon at 46.5°N)
+    # so the geocoder still resolves addresses on adjacent streets that
+    # sit just outside the cluster polygon, but can't escape to Vienna.
+    cl_lon_min, cl_lat_min, cl_lon_max, cl_lat_max = cluster.total_bounds
+    pad = 0.15
+    geocode_viewbox = (
+        cl_lon_min - pad, cl_lat_min - pad,
+        cl_lon_max + pad, cl_lat_max + pad,
+    )
+    geocoder = Geocoder(network_disabled=args.no_geocode, viewbox=geocode_viewbox)
     rep_rows: list[dict] = []  # geomatch rows for representatives only
 
     n_overlay = n_geocoded = n_none = n_off_cluster = n_flag = 0
