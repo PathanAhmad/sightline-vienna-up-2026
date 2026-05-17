@@ -590,6 +590,36 @@ def main() -> None:
             lons = [p[1] for p in upload_latlons]
             focus_bounds = ((min(lats), min(lons)), (max(lats), max(lons)))
 
+    # Demo-tour pills (Duplicate / GDPR redaction) drop a segment_id
+    # here so the map pans to it. Without this the rail panel opens
+    # but the map stays put, making the click feel broken.
+    fly_seg = st.session_state.pop("_fly_to_segment", None)
+    if focus_bounds is None and fly_seg:
+        for feat in trenches.get("features", []):
+            props = feat["properties"]
+            sid = (
+                props.get("externalID")
+                or props.get("globalID")
+                or props.get("segment_id")
+            )
+            if sid != fly_seg:
+                continue
+            geom = feat.get("geometry", {})
+            gtype = geom.get("type")
+            if gtype == "LineString":
+                pts = geom["coordinates"]
+            elif gtype == "MultiLineString":
+                pts = [pt for line in geom["coordinates"] for pt in line]
+            else:
+                pts = []
+            if pts:
+                lons = [c[0] for c in pts]
+                lats = [c[1] for c in pts]
+                focus_bounds = (
+                    (min(lats), min(lons)), (max(lats), max(lons)),
+                )
+            break
+
     m = map_view.build_map(
         trenches, fcps, cluster, verdicts_by_segment, photo_points,
         upload_points=upload_points,

@@ -82,27 +82,29 @@ def _find_demo_segments(
             red_segs, key=lambda s: float(s.get("length_m") or 0),
         )["segment_id"]
 
-    gdpr: str | None = None
+    # Pick the segment with the MOST matching photos -- bigger visible
+    # payoff than iloc[0] (which was undefined-ordering, often landed on
+    # an unremarkable single-photo segment with only 4 non-reps in data).
+    def _top_segment_by_count(photo_ids: set[str]) -> str | None:
+        if not photo_ids or geomatch_df.empty:
+            return None
+        match = geomatch_df[geomatch_df["photo_id"].isin(photo_ids)]
+        match = match[match["segment_id"].notna() & (match["segment_id"] != "")]
+        if match.empty:
+            return None
+        return str(match["segment_id"].value_counts().idxmax())
+
     pd_photos = {
         r["photo_id"] for r in readqc
         if r.get("personal_data_visible") == "yes"
     }
-    if pd_photos and not geomatch_df.empty:
-        match = geomatch_df[geomatch_df["photo_id"].isin(pd_photos)]
-        match = match[match["segment_id"].notna() & (match["segment_id"] != "")]
-        if not match.empty:
-            gdpr = str(match.iloc[0]["segment_id"])
+    gdpr = _top_segment_by_count(pd_photos)
 
-    duplicate: str | None = None
     non_rep = {
         r["photo_id"] for r in forensics
         if not r.get("is_phash_representative")
     }
-    if non_rep and not geomatch_df.empty:
-        match = geomatch_df[geomatch_df["photo_id"].isin(non_rep)]
-        match = match[match["segment_id"].notna() & (match["segment_id"] != "")]
-        if not match.empty:
-            duplicate = str(match.iloc[0]["segment_id"])
+    duplicate = _top_segment_by_count(non_rep)
 
     return {"red_gap": red_gap, "duplicate": duplicate, "gdpr": gdpr}
 
@@ -167,3 +169,13 @@ def render(
             )
             if clicked and seg_id is not None:
                 st.session_state["selected_segment"] = seg_id
+                # Pan the map to the picked segment for the same frame.
+                # Without this, only the rail panel changes -- the map
+                # looks identical and the click feels broken. Consumed
+                # once by app.py's focus_bounds path.
+                st.session_state["_fly_to_segment"] = seg_id
+                # Also reset the click-handler's "last seen click" so a
+                # later real map click on the same segment still opens
+                # the panel (st_folium replays its last click payload).
+                st.session_state["_last_map_click_seg"] = seg_id
+                st.rerun()
