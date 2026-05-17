@@ -171,7 +171,7 @@ def _draw_chrome(canvas, doc, generated_on: str) -> None:
     canvas.setFont(_FONT, 8.5)
     canvas.drawRightString(
         PAGE_W - MARGIN_X, PAGE_H - band_h + 5.2 * mm,
-        "ÖGIG  ·  Photo QC pipeline",
+        "Sightline  ·  Photo QC pipeline",
     )
 
     # Hairline under the band.
@@ -663,7 +663,7 @@ def _cover_flowables(
 
     if intake is not None:
         out.append(Spacer(1, 14))
-        out.append(Paragraph("Photo intake", S_H2))
+        out.append(Paragraph("Photo results", S_H2))
         out.append(Paragraph(
             "These numbers describe the photos that came in for this "
             "run. \"Passed every per-photo check\" is the pool of usable "
@@ -1105,7 +1105,7 @@ def build_pdf(
         leftMargin=MARGIN_X, rightMargin=MARGIN_X,
         topMargin=MARGIN_TOP, bottomMargin=MARGIN_BOTTOM,
         title="Trench photo deficiency report",
-        author="APG photo-QC pipeline",
+        author="Sightline photo-QC pipeline",
     )
     frame = Frame(
         doc.leftMargin, doc.bottomMargin,
