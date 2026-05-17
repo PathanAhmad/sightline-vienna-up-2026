@@ -21,7 +21,7 @@ from typing import Any
 
 import streamlit as st
 
-from src.ui.components import archive_expand, topbar
+from src.ui.components import archive_expand, topbar, upload_map
 from src.ui.components.live_score import (
     DEFAULT_LIVE_MODEL_KEY,
     render_result_card,
@@ -540,10 +540,18 @@ def render() -> None:
                 "label": label,
             })
 
+        # ---- Map card ------------------------------------------------
+        # Slots between scoring and the per-photo grid so a reviewer sees
+        # the spatial story before drilling into individual verdicts.
+        # Pins use overlay-GPS where available and fall back to the cached
+        # Nominatim geocode of the photo's printed street address.
+        if results:
+            upload_map.render_card(results)
+
         # ---- Results card --------------------------------------------
         with st.container(border=True, key="card_results"):
             _card_head(
-                "03 · Per-photo verdicts",
+                "04 · Per-photo verdicts",
                 "Results",
                 "Each photo scored against the seven APG / NIS2 checks",
             )
