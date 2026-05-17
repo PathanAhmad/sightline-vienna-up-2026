@@ -1,452 +1,396 @@
-"""Generate APG_TrenchVerify_Pitch.pptx — run with: uv run python generate_ppt.py"""
+"""Generate Sightline_Pitch.pptx — run with: uv run python generate_ppt.py
+
+4-slide editorial deck for the Sunday Vienna UP pitch (3 minutes total).
+Demo eats ~90 s and lives between slide 2 and slide 3 (alt-tab to the
+dashboard, alt-tab back).
+
+Arc:
+  1. HOOK       (quote)               — the line they remember
+  2. PIPELINE   (6 stages)            — technical credibility
+  → live demo on the dashboard
+  3. NUMBERS    (dataset + dial)      — two tiers, speaker carries the rest
+  4. CLOSE      (echo)                — the invitation
+
+Slides scaffold the speech — they don't replicate it. The speaker carries
+depth, tone, and examples. Palette + font mirror src/ui/tokens.py so the
+slide-to-demo handoff feels like one product.
+"""
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
-
-# ── Palette ────────────────────────────────────────────────────────────────
-DARK_BG    = RGBColor(0x0D, 0x1B, 0x2A)   # deep navy
-ACCENT     = RGBColor(0x00, 0xA8, 0xE8)   # APG-ish electric blue
-ACCENT2    = RGBColor(0x00, 0xD4, 0x7E)   # green (compliance)
-WARN       = RGBColor(0xFF, 0xC1, 0x07)   # amber (problems)
-DANGER     = RGBColor(0xFF, 0x4D, 0x4D)   # red
-WHITE      = RGBColor(0xFF, 0xFF, 0xFF)
-LIGHT_GREY = RGBColor(0xCC, 0xD6, 0xE0)
-MID_GREY   = RGBColor(0x44, 0x55, 0x66)
-
-W = Inches(13.33)   # widescreen 16:9
-H = Inches(7.5)
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
 
 
-def prs() -> Presentation:
+# ── Pilot numbers (projected from 214-photo benchmark, scaled to ~3,400
+# unique photos after dedup of the 3,929-photo Maria Rain dataset) ──────────
+DATASET_SIZE = "3,929 photos"
+FAST_COST    = "$12"
+FAST_TIME    = "90 min"
+FAST_ACC     = "87% depth-evidence"
+CAREFUL_COST = "$40"
+CAREFUL_TIME = "3 h"
+CAREFUL_ACC  = "96% depth-evidence"
+
+
+# ── Palette (mirrors src/ui/tokens.py) ──────────────────────────────────────
+BG       = RGBColor(0xF6, 0xF7, 0xF9)   # --c-bg
+BORDER   = RGBColor(0xE5, 0xE7, 0xEB)   # --c-border
+INK      = RGBColor(0x0F, 0x17, 0x2A)   # --c-text          slate-900
+BODY     = RGBColor(0x47, 0x55, 0x69)   # --c-text-2        slate-600
+MUTED    = RGBColor(0x64, 0x74, 0x8B)   # --c-muted         slate-500
+ACCENT   = RGBColor(0x03, 0x69, 0xA1)   # --c-accent        sky-700
+
+
+# ── Typography (strict 5-tier scale, do not add a sixth) ────────────────────
+FONT     = "Segoe UI"
+T_HERO   = 48   # the quote, the close echo, the $15 anchor
+T_HEAD   = 32   # standard slide headline (pipeline stage labels)
+T_BODY   = 22   # body-emphasis: bullets, supporting lines
+T_CAP    = 14   # captions
+T_META   = 11   # eyebrow, footer, brand mark, tech footnote
+
+
+# 16:9
+SLIDE_W = Inches(13.333)
+SLIDE_H = Inches(7.5)
+
+# Editorial margins
+LEFT_X    = Inches(0.95)
+CONTENT_W = Inches(11.4)
+
+
+# ── Primitives ──────────────────────────────────────────────────────────────
+def _prs() -> Presentation:
     p = Presentation()
-    p.slide_width  = W
-    p.slide_height = H
+    p.slide_width  = SLIDE_W
+    p.slide_height = SLIDE_H
     return p
 
 
-def blank(p: Presentation):
-    blank_layout = p.slide_layouts[6]  # completely blank
-    return p.slides.add_slide(blank_layout)
+def _blank(prs):
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    bg = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SLIDE_W, SLIDE_H)
+    bg.fill.solid()
+    bg.fill.fore_color.rgb = BG
+    bg.line.fill.background()
+    bg.shadow.inherit = False
+    # Thin left brand stripe -- the deck's only persistent visual mark.
+    stripe = s.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, 0, 0, Inches(0.10), SLIDE_H
+    )
+    stripe.fill.solid()
+    stripe.fill.fore_color.rgb = ACCENT
+    stripe.line.fill.background()
+    return s
 
 
-def bg(slide, color: RGBColor = DARK_BG):
-    fill = slide.background.fill
-    fill.solid()
-    fill.fore_color.rgb = color
-
-
-def txb(slide, left, top, width, height,
-        text="", size=18, bold=False, color=WHITE,
-        align=PP_ALIGN.LEFT, italic=False, wrap=True):
-    tb = slide.shapes.add_textbox(left, top, width, height)
+def _text(
+    slide, txt, x, y, w, h,
+    size=T_BODY, color=BODY, bold=False, italic=False,
+    align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
+    tracking=0, leading=1.2,
+):
+    tb = slide.shapes.add_textbox(x, y, w, h)
     tf = tb.text_frame
-    tf.word_wrap = wrap
-    p = tf.paragraphs[0]
-    p.alignment = align
-    run = p.add_run()
-    run.text = text
-    run.font.size = Pt(size)
-    run.font.bold = bold
-    run.font.italic = italic
-    run.font.color.rgb = color
+    tf.word_wrap = True
+    tf.margin_left = tf.margin_right = 0
+    tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = anchor
+
+    lines = txt.split("\n") if isinstance(txt, str) else txt
+    for i, line in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = align
+        p.line_spacing = leading
+        r = p.add_run()
+        r.text = line
+        f = r.font
+        f.name = FONT
+        f.size = Pt(size)
+        f.bold = bold
+        f.italic = italic
+        f.color.rgb = color
+        if tracking:
+            rPr = r._r.get_or_add_rPr()
+            rPr.set("spc", str(tracking))
     return tb
 
 
-def accent_bar(slide, top=Inches(0.12), color=ACCENT):
-    bar = slide.shapes.add_shape(
-        1,  # rectangle
-        Inches(0), top, W, Inches(0.08)
+def _hairline(slide, x, y, w, color=BORDER, weight=0.5):
+    line = slide.shapes.add_connector(1, x, y, x + w, y)
+    line.line.color.rgb = color
+    line.line.width = Pt(weight)
+    return line
+
+
+def _eyebrow(slide, txt):
+    _text(
+        slide, txt,
+        LEFT_X, Inches(0.75), CONTENT_W, Inches(0.35),
+        size=T_META, color=ACCENT, bold=True, tracking=400,
     )
-    bar.fill.solid()
-    bar.fill.fore_color.rgb = color
-    bar.line.fill.background()
 
 
-def card(slide, left, top, width, height, fill_color=MID_GREY, radius=False):
-    shape = slide.shapes.add_shape(1, left, top, width, height)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = fill_color
-    shape.line.fill.background()
-    return shape
+def _footer(slide, text="SIGHTLINE  ·  VIENNA UP 2026"):
+    _text(
+        slide, text,
+        LEFT_X, Inches(7.05), CONTENT_W, Inches(0.3),
+        size=T_META, color=MUTED, tracking=300,
+    )
 
 
-def section_label(slide, text):
-    txb(slide, Inches(0.5), Inches(0.25), Inches(12), Inches(0.4),
-        text=text.upper(), size=9, color=ACCENT, bold=True)
+# ── Slide 1 — the hook ──────────────────────────────────────────────────────
+def slide_hook(prs):
+    s = _blank(prs)
+
+    _text(
+        s, "SIGHTLINE",
+        LEFT_X, Inches(0.75), CONTENT_W, Inches(0.35),
+        size=T_META, color=INK, bold=True, tracking=600,
+    )
+
+    _text(
+        s, "“The trench gets filled in.",
+        LEFT_X, Inches(2.65), CONTENT_W, Inches(1.1),
+        size=T_HERO, color=INK, bold=True, leading=1.1,
+    )
+    _text(
+        s, "The questions never do.”",
+        LEFT_X, Inches(3.85), CONTENT_W, Inches(1.1),
+        size=T_HERO, color=ACCENT, bold=True, leading=1.1,
+    )
+
+    _footer(s, "VIENNA UP 2026  ·  CHALLENGE 2")
+    return s
 
 
-# ── SLIDE 1 — Title ─────────────────────────────────────────────────────────
-def slide_title(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, Inches(0), ACCENT)
-    accent_bar(s, Inches(7.4), ACCENT2)
+# ── Slide 2 — the pipeline ──────────────────────────────────────────────────
+def slide_pipeline(prs):
+    """Six-stage pipeline shown as a horizontal flow.
 
-    # Large project name
-    txb(s, Inches(0.7), Inches(1.6), Inches(11.5), Inches(1.4),
-        "TrenchVerify", size=72, bold=True, color=WHITE, align=PP_ALIGN.LEFT)
-    txb(s, Inches(0.7), Inches(3.0), Inches(11.5), Inches(0.7),
-        "From Site Photo to Compliance Audit — Automatically",
-        size=26, bold=False, color=ACCENT, align=PP_ALIGN.LEFT)
+    Speaker elaborates on the two surprises (dedup-before-AI, GPS-from-
+    printed-overlay) and lets the rest read.
+    """
+    s = _blank(prs)
+    _eyebrow(s, "01  —  THE PIPELINE")
 
-    # Tagline pills
-    tagline = "AI-powered photo review  ·  Full audit trail  ·  GDPR-compliant  ·  Zero data retained"
-    txb(s, Inches(0.7), Inches(3.9), Inches(11.5), Inches(0.5),
-        tagline, size=14, color=LIGHT_GREY)
+    _text(
+        s, "Six stages. Two surprised us.",
+        LEFT_X, Inches(1.4), CONTENT_W, Inches(0.9),
+        size=T_HEAD, color=INK, bold=True, leading=1.15,
+    )
 
-    # Team + event
-    txb(s, Inches(0.7), Inches(6.4), Inches(8), Inches(0.5),
-        "Team: [Name 1]  ·  [Name 2]  ·  [Name 3]",
-        size=13, color=LIGHT_GREY)
-    txb(s, Inches(9.5), Inches(6.4), Inches(3.5), Inches(0.5),
-        "Vienna UP 2026  ·  May 2026",
-        size=13, color=LIGHT_GREY, align=PP_ALIGN.RIGHT)
-
-
-# ── SLIDE 2 — Problem ───────────────────────────────────────────────────────
-def slide_problem(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=WARN)
-    section_label(s, "The Problem")
-
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "What APG Cannot See Will Cost Millions",
-        size=32, bold=True, color=WHITE)
-
-    problems = [
-        ("Missing\nDocumentation",
-         "No compliant photo evidence for open trench, duct positioning, or sand bedding at critical sections.\n\nResult: Warranty claims invalid — liability shifts from contractors to APG."),
-        ("No Audit\nTrail",
-         "Manual spot-checks miss ~30% of defects. No timestamped, per-meter record exists.\n\nResult: Cannot prove contractual compliance after work is buried and closed."),
-        ("Slow &\nImpossible to Scale",
-         "3–5 days per section × 9 sections × 100× backlog = thousands of person-days of review.\n\nResult: Review gets skipped. Problems surface years later via excavator damage."),
+    # Six pipeline nodes, evenly distributed across the content width.
+    stages = [
+        ("01", "INGEST",  "photos +\nGeoJSON route"),
+        ("02", "DEDUP",   "perceptual hash\non laptop, free"),
+        ("03", "READ",    "vision AI reads\nthe printed overlay"),
+        ("04", "SCORE",   "7 compliance checks\nper photo, 1 call"),
+        ("05", "MAP",     "every photo →\n5 m trench segment"),
+        ("06", "REPORT",  "CSV + PDF\ndeficiency log"),
     ]
 
-    col_w = Inches(3.9)
-    col_gap = Inches(0.3)
-    for i, (title, body) in enumerate(problems):
-        x = Inches(0.5) + i * (col_w + col_gap)
-        card(s, x, Inches(1.5), col_w, Inches(5.5), RGBColor(0x1A, 0x2E, 0x42))
-        txb(s, x + Inches(0.2), Inches(1.65), col_w - Inches(0.4), Inches(0.9),
-            title, size=20, bold=True, color=WARN)
-        txb(s, x + Inches(0.2), Inches(2.65), col_w - Inches(0.4), Inches(4.0),
-            body, size=20, color=LIGHT_GREY, wrap=True)
+    n = len(stages)
+    # Column layout
+    col_w = CONTENT_W / n
+    top_y = Inches(3.2)
+    label_h = Inches(0.45)
+    name_h  = Inches(0.55)
+    body_h  = Inches(1.0)
+
+    for i, (num, name, body) in enumerate(stages):
+        x = LEFT_X + col_w * i
+        # number badge
+        _text(
+            s, num,
+            x, top_y, col_w, label_h,
+            size=T_META, color=ACCENT, bold=True, tracking=300,
+            align=PP_ALIGN.LEFT,
+        )
+        # stage name
+        _text(
+            s, name,
+            x, top_y + label_h, col_w, name_h,
+            size=T_BODY, color=INK, bold=True, tracking=200,
+        )
+        # short subtitle
+        _text(
+            s, body,
+            x, top_y + label_h + name_h + Inches(0.05),
+            col_w, body_h,
+            size=T_CAP, color=BODY, leading=1.35,
+        )
+        # arrow to next stage (skip last)
+        if i < n - 1:
+            arrow_y = top_y + label_h + Inches(0.18)
+            _text(
+                s, "→",
+                x + col_w - Inches(0.12), arrow_y,
+                Inches(0.2), Inches(0.3),
+                size=T_BODY, color=ACCENT, bold=True,
+            )
+
+    # Demo handoff line at the bottom.
+    _hairline(s, LEFT_X, Inches(6.05), Inches(11.4))
+    _text(
+        s, "Live demo, next.",
+        LEFT_X, Inches(6.20), CONTENT_W, Inches(0.5),
+        size=T_CAP, color=ACCENT, italic=True, bold=True,
+    )
+
+    _footer(s, "02 / 04")
+    return s
 
 
-# ── SLIDE 3 — Cost of Inaction ──────────────────────────────────────────────
-def slide_cost(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=DANGER)
-    section_label(s, "Cost of Inaction")
+# ── Slide 3 — the numbers (dataset + dial) ──────────────────────────────────
+def slide_numbers(prs):
+    """Dataset size on top, two-tier dial underneath. The speaker delivers
+    the projection caveat and the accuracy beat verbally; the slide just
+    anchors the two-tier shape so judges can compare with their eyes."""
+    s = _blank(prs)
+    _eyebrow(s, "02  —  THE NUMBERS")
 
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "Poor Documentation Today = Exponential Costs Tomorrow",
-        size=32, bold=True, color=WHITE)
+    # Dataset headline — sets the scale of what the dial operates on.
+    _text(
+        s, DATASET_SIZE,
+        LEFT_X, Inches(1.55), CONTENT_W, Inches(1.1),
+        size=T_HERO, color=INK, bold=True,
+        align=PP_ALIGN.CENTER, leading=1.0,
+    )
+    _text(
+        s, "Two ways to run it.",
+        LEFT_X, Inches(2.55), CONTENT_W, Inches(0.5),
+        size=T_BODY, color=MUTED, italic=True,
+        align=PP_ALIGN.CENTER,
+    )
 
-    stats = [
-        ("€120K+",  "Average cost per\nfiber-cut incident"),
-        ("3–5×",    "Cost multiplier when\nwork is undocumented"),
-        ("€2.4M+",  "Estimated 5-year\nexposure if unresolved"),
-        ("50 yrs",  "Planned asset lifespan\nnow at risk"),
-    ]
+    # Two-column dial — left = fast, right = careful. Hairline divider
+    # between them so the contrast reads at-a-glance.
+    col_w = Inches(5.4)
+    gap   = Inches(0.6)
+    total_w = col_w * 2 + gap
+    col_x_l = LEFT_X + (CONTENT_W - total_w) / 2
+    col_x_r = col_x_l + col_w + gap
+    col_y   = Inches(3.55)
 
-    box_w = Inches(2.8)
-    box_h = Inches(2.8)
-    gap   = Inches(0.4)
-    start_x = Inches(0.8)
-    for i, (num, label) in enumerate(stats):
-        x = start_x + i * (box_w + gap)
-        card(s, x, Inches(2.0), box_w, box_h, RGBColor(0x3A, 0x10, 0x10))
-        txb(s, x, Inches(2.1), box_w, Inches(1.2),
-            num, size=40, bold=True, color=DANGER, align=PP_ALIGN.CENTER)
-        txb(s, x, Inches(3.3), box_w, Inches(1.2),
-            label, size=19, color=LIGHT_GREY, align=PP_ALIGN.CENTER)
+    # Vertical hairline between the two columns.
+    _hairline(
+        s,
+        col_x_l + col_w + gap / 2,
+        col_y + Inches(0.15),
+        Inches(0),
+        color=BORDER, weight=0.5,
+    )
+    # Manual vertical line (connector with same x for start/end is a point;
+    # use a thin rectangle instead so it actually shows on PowerPoint).
+    div = s.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        col_x_l + col_w + gap / 2 - Inches(0.005),
+        col_y + Inches(0.20),
+        Inches(0.01),
+        Inches(2.2),
+    )
+    div.fill.solid()
+    div.fill.fore_color.rgb = BORDER
+    div.line.fill.background()
 
-    txb(s, Inches(0.5), Inches(5.2), Inches(12), Inches(0.4),
-        "* Based on industry benchmarks and internal öGIG / APG estimates",
-        size=10, color=MID_GREY, italic=True)
+    def _tier_column(x, tier_label, cost, time, accuracy):
+        # Eyebrow label
+        _text(
+            s, tier_label,
+            x, col_y, col_w, Inches(0.4),
+            size=T_META, color=ACCENT, bold=True, tracking=400,
+            align=PP_ALIGN.CENTER,
+        )
+        # Cost as the hero number
+        _text(
+            s, cost,
+            x, col_y + Inches(0.45), col_w, Inches(1.4),
+            size=84, color=INK, bold=True,
+            align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE,
+            leading=1.0,
+        )
+        # Time underneath, sub-dominant
+        _text(
+            s, time,
+            x, col_y + Inches(1.85), col_w, Inches(0.5),
+            size=T_HEAD, color=BODY, bold=False,
+            align=PP_ALIGN.CENTER,
+        )
+        # Accuracy callout (smallest, the credibility line the speaker
+        # elaborates on).
+        _text(
+            s, accuracy,
+            x, col_y + Inches(2.45), col_w, Inches(0.4),
+            size=T_CAP, color=MUTED, italic=True,
+            align=PP_ALIGN.CENTER,
+        )
 
-    txb(s, Inches(0.5), Inches(5.8), Inches(12), Inches(1.3),
-        "The real question isn't whether to fix this.\nIt's whether to fix it before or after the next fiber cut.",
-        size=18, bold=True, color=WARN, align=PP_ALIGN.CENTER)
+    _tier_column(col_x_l, "FAST TIER",    FAST_COST,    FAST_TIME,    FAST_ACC)
+    _tier_column(col_x_r, "CAREFUL TIER", CAREFUL_COST, CAREFUL_TIME, CAREFUL_ACC)
 
+    # Manual-baseline anchor — the business-model angle, quiet. Speaker
+    # turns this into the "weeks of senior review → price of a lunch"
+    # contrast; the slide just lets judges multiply in their heads.
+    _text(
+        s, "Manual review  ·  3 – 5 engineer-days per section",
+        LEFT_X, Inches(6.30), CONTENT_W, Inches(0.35),
+        size=T_CAP, color=MUTED, italic=True,
+        align=PP_ALIGN.CENTER, tracking=200,
+    )
 
-# ── SLIDE 4 — Our Solution ──────────────────────────────────────────────────
-def slide_solution(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=ACCENT2)
-    section_label(s, "Our Solution")
+    # Bottom rail — the product point.
+    _hairline(s, LEFT_X + Inches(5.2), Inches(6.75), Inches(3.0),
+              color=ACCENT, weight=1.5)
+    _text(
+        s, "Same pipeline. Operator picks.",
+        LEFT_X, Inches(6.85), CONTENT_W, Inches(0.4),
+        size=T_BODY, color=BODY, italic=True,
+        align=PP_ALIGN.CENTER,
+    )
 
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "A Digital Compliance Platform — Built for APG",
-        size=32, bold=True, color=WHITE)
-
-    pillars = [
-        (ACCENT2,  "100%\nCoverage",
-         "Every trench segment reviewed automatically.\nNo spot-checks. No gaps."),
-        (ACCENT,   "Full\nAudit Trail",
-         "Every photo timestamped, GPS-matched,\ncompliance-scored, and logged."),
-        (WARN,     "GDPR\nSafe",
-         "Faces & plates auto-detected and withheld.\nNothing stored on our infrastructure."),
-        (WHITE,    "99%\nFaster",
-         "< 30 minutes for the full route —\nvs. 3–5 days per section manually."),
-    ]
-
-    box_w = Inches(2.8)
-    gap   = Inches(0.4)
-    start_x = Inches(0.8)
-    for i, (color, title, body) in enumerate(pillars):
-        x = start_x + i * (box_w + gap)
-        card(s, x, Inches(1.6), box_w, Inches(5.3), RGBColor(0x12, 0x26, 0x36))
-        # top accent stripe
-        top_bar = s.shapes.add_shape(1, x, Inches(1.6), box_w, Inches(0.12))
-        top_bar.fill.solid(); top_bar.fill.fore_color.rgb = color
-        top_bar.line.fill.background()
-        txb(s, x, Inches(1.85), box_w, Inches(1.1),
-            title, size=22, bold=True, color=color, align=PP_ALIGN.CENTER)
-        txb(s, x + Inches(0.15), Inches(3.1), box_w - Inches(0.3), Inches(3.5),
-            body, size=20, color=LIGHT_GREY, align=PP_ALIGN.CENTER, wrap=True)
-
-
-# ── SLIDE 5 — Pipeline ──────────────────────────────────────────────────────
-def slide_pipeline(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=ACCENT)
-    section_label(s, "How It Works")
-
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "Six Steps, 30 Minutes, Zero Human Bottleneck",
-        size=32, bold=True, color=WHITE)
-
-    steps = [
-        ("1", "Ingest",      "~3,929 photos +\nGeoJSON route file\nloaded into pipeline"),
-        ("2", "Geo-Match",   "GPS overlay text\nmatched to trench\nsegment at 5 m res."),
-        ("3", "AI Review",   "6 compliance checks\nper photo via\nAI vision model"),
-        ("4", "Classify",    "Each segment scored:\nGREEN / YELLOW / RED\nbased on check results"),
-        ("5", "Map",         "Interactive color\nmap rendered in\nbrowser — click any seg."),
-        ("6", "Audit Report","CSV + PDF report\ndownloaded; full\nper-meter log exported"),
-    ]
-
-    box_w  = Inches(1.9)
-    box_h  = Inches(3.8)
-    gap    = Inches(0.22)
-    start_x = Inches(0.35)
-
-    for i, (num, title, body) in enumerate(steps):
-        x = start_x + i * (box_w + gap)
-        card(s, x, Inches(1.55), box_w, box_h, RGBColor(0x12, 0x26, 0x36))
-        # number circle (small box acting as badge)
-        badge = s.shapes.add_shape(1, x + Inches(0.7), Inches(1.45), Inches(0.5), Inches(0.4))
-        badge.fill.solid(); badge.fill.fore_color.rgb = ACCENT
-        badge.line.fill.background()
-        txb(s, x + Inches(0.7), Inches(1.45), Inches(0.5), Inches(0.4),
-            num, size=13, bold=True, color=DARK_BG, align=PP_ALIGN.CENTER)
-
-        txb(s, x, Inches(2.0), box_w, Inches(0.6),
-            title, size=16, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
-        txb(s, x + Inches(0.1), Inches(2.7), box_w - Inches(0.2), Inches(2.4),
-            body, size=18, color=LIGHT_GREY, align=PP_ALIGN.CENTER, wrap=True)
-
-        # arrow between steps (except last)
-        if i < len(steps) - 1:
-            ax = x + box_w + Inches(0.03)
-            txb(s, ax, Inches(3.1), Inches(0.2), Inches(0.4),
-                "→", size=18, bold=True, color=ACCENT, align=PP_ALIGN.CENTER)
-
-    # 6 checks footnote
-    checks = ("6 checks: warning tape · sand bedding · side-view angle · depth reference · "
-              "sealed cable ends · GDPR (faces/plates)")
-    txb(s, Inches(0.5), Inches(5.55), Inches(12.3), Inches(0.45),
-        checks, size=10, color=MID_GREY, italic=True)
-
-    # comparison bar
-    card(s, Inches(0.5), Inches(6.15), Inches(12.3), Inches(0.95), RGBColor(0x0A, 0x3A, 0x1A))
-    txb(s, Inches(0.7), Inches(6.2), Inches(12), Inches(0.85),
-        "Manual review: 3–5 days per section   →   TrenchVerify: < 30 minutes for the full 2,983-segment route",
-        size=16, bold=True, color=ACCENT2, align=PP_ALIGN.CENTER)
+    _footer(s, "03 / 04")
+    return s
 
 
+# ── Slide 4 — close (echoes the hook) ───────────────────────────────────────
+def slide_close(prs):
+    s = _blank(prs)
 
-# ── SLIDE 7 — Compliance & GDPR ──────────────────────────────────────────────
-def slide_compliance(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=ACCENT2)
-    section_label(s, "Compliance & GDPR")
+    # No eyebrow on the close -- this is the final beat, not a step.
+    _text(
+        s, "Don’t let the questions",
+        LEFT_X, Inches(2.55), CONTENT_W, Inches(1.1),
+        size=T_HERO, color=INK, bold=True, leading=1.1,
+    )
+    _text(
+        s, "outlive the trench.",
+        LEFT_X, Inches(3.75), CONTENT_W, Inches(1.1),
+        size=T_HERO, color=ACCENT, bold=True, leading=1.1,
+    )
 
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "Compliance Report: What APG Receives",
-        size=32, bold=True, color=WHITE)
+    _hairline(s, LEFT_X, Inches(5.40), Inches(0.5), color=INK, weight=1.0)
+    _text(
+        s,
+        "Sightline.  The demo’s live.",
+        LEFT_X, Inches(5.60), CONTENT_W, Inches(0.5),
+        size=T_BODY, color=INK, bold=True,
+    )
 
-    items = [
-        (ACCENT2, "GDPR / NIS2\nCompliant",
-         "Faces and license plates detected in every photo before any reviewer sees them. "
-         "Flagged images are withheld from the display grid and routed to a \"needs retake\" list. "
-         "No personal data is ever shown, stored, or transmitted to our infrastructure."),
-        (ACCENT,  "Zero Data\nRetention",
-         "Photos are processed transiently — held in memory for the duration of the AI call, then released. "
-         "Nothing is persisted on our servers. "
-         "All results (scores, logs) are written exclusively to the customer's own database."),
-        (WARN,    "Full Audit\nTrail",
-         "Every check result is logged with: photo ID · trench segment · GPS coordinates · timestamp · "
-         "pass/fail per check. The export is a court-admissible evidence trail, not just a summary report."),
-        (WHITE,   "Contractor\nAccountability",
-         "Duplicate-photo detection fingerprints every image. "
-         "If a contractor reuses the same photo across jobs, the system catches the original, the copy, "
-         "and all job IDs it was submitted to. In our pilot: ~600 duplicates detected automatically."),
-    ]
-
-    box_w = Inches(5.8)
-    box_h = Inches(2.5)
-    positions = [
-        (Inches(0.4),  Inches(1.5)),
-        (Inches(6.9),  Inches(1.5)),
-        (Inches(0.4),  Inches(4.2)),
-        (Inches(6.9),  Inches(4.2)),
-    ]
-
-    for (x, y), (color, title, body) in zip(positions, items):
-        card(s, x, y, box_w, box_h, RGBColor(0x12, 0x26, 0x36))
-        top_bar = s.shapes.add_shape(1, x, y, box_w, Inches(0.1))
-        top_bar.fill.solid(); top_bar.fill.fore_color.rgb = color
-        top_bar.line.fill.background()
-        txb(s, x + Inches(0.2), y + Inches(0.15), box_w - Inches(0.4), Inches(0.75),
-            title, size=17, bold=True, color=color)
-        txb(s, x + Inches(0.2), y + Inches(0.95), box_w - Inches(0.4), Inches(1.4),
-            body, size=18, color=LIGHT_GREY, wrap=True)
+    _footer(s, "TEAM SIGHTLINE  ·  VIENNA UP 2026")
+    return s
 
 
-# ── SLIDE 8 — Business Value (Google XYZ) ───────────────────────────────────
-def slide_value(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, color=ACCENT2)
-    section_label(s, "Business Value")
-
-    txb(s, Inches(0.5), Inches(0.55), Inches(12), Inches(0.7),
-        "The Numbers Speak for Themselves",
-        size=29, bold=True, color=WHITE)
-
-    xyz = [
-        ("€2.4M+",   "5-year liability exposure eliminated",
-         "by catching every defect before contractor sign-off\n(€120K/incident × ~30% miss rate)"),
-        ("99%",      "faster review time",
-         "3–5 days per section → < 30 min for the full route\n(measured: 3,929 photos in 28 min)"),
-        ("100%",     "segment coverage",
-         "zero trench meters go unreviewed\n(photo-per-5 m rule across all 2,983 segments)"),
-        ("100%",     "audit transparency",
-         "every check logged per photo · per meter · per timestamp\n(exportable CSV/PDF, court-admissible)"),
-        ("0%",       "hidden GDPR risk",
-         "faces & plates flagged and withheld before any reviewer sees them\n(NIS2/GDPR checks run on 100% of photos)"),
-    ]
-
-    row_h = Inches(1.0)
-    for i, (stat, label, detail) in enumerate(xyz):
-        y = Inches(1.5) + i * row_h
-        card(s, Inches(0.4), y, Inches(12.5), row_h - Inches(0.06),
-             RGBColor(0x12, 0x26, 0x36))
-        color = {"99%": ACCENT}.get(stat, ACCENT2)
-        txb(s, Inches(0.6), y + Inches(0.1), Inches(1.6), Inches(0.8),
-            stat, size=34, bold=True, color=color, align=PP_ALIGN.CENTER)
-        txb(s, Inches(2.4), y + Inches(0.05), Inches(4.0), Inches(0.5),
-            label, size=16, bold=True, color=WHITE)
-        txb(s, Inches(2.4), y + Inches(0.52), Inches(10.0), Inches(0.42),
-            detail, size=17, color=LIGHT_GREY, italic=True)
-
-    # Pilot stats bar
-    card(s, Inches(0.4), Inches(6.65), Inches(12.5), Inches(0.65),
-         RGBColor(0x00, 0x3A, 0x20))
-    txb(s, Inches(0.6), Inches(6.7), Inches(12.2), Inches(0.55),
-        "28 minutes end-to-end  ·  3,929 photos  ·  2,983 segments scored  ·  ~600 duplicates caught",
-        size=14, bold=True, color=ACCENT2, align=PP_ALIGN.CENTER)
-
-
-# ── SLIDE 9 — Call to Action ─────────────────────────────────────────────────
-def slide_cta(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, Inches(0), ACCENT)
-    accent_bar(s, Inches(7.4), ACCENT2)
-
-    txb(s, Inches(0.7), Inches(0.6), Inches(11.5), Inches(0.9),
-        "Every Unreviewed Meter Is a Liability.\nWe Close That Gap — Automatically.",
-        size=28, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
-
-    steps = [
-        ("01", ACCENT,  "Approve Pilot",
-         "Authorise the TrenchVerify AI pilot\nfor the current Klosterneuburg\nroute build"),
-        ("02", WARN,    "Define KPIs",
-         "Set acceptance thresholds:\ncoverage %, photo compliance rate,\ntime-to-report"),
-        ("03", ACCENT2, "Scale",
-         "Roll out across all future APG\nconstruction phases — protect\nthe full network"),
-    ]
-
-    box_w = Inches(3.6)
-    gap   = Inches(0.5)
-    start_x = Inches(0.95)
-    for i, (num, color, title, body) in enumerate(steps):
-        x = start_x + i * (box_w + gap)
-        card(s, x, Inches(1.75), box_w, Inches(4.2), RGBColor(0x12, 0x26, 0x36))
-        top_bar2 = s.shapes.add_shape(1, x, Inches(1.75), box_w, Inches(0.15))
-        top_bar2.fill.solid(); top_bar2.fill.fore_color.rgb = color
-        top_bar2.line.fill.background()
-        txb(s, x, Inches(2.0), box_w, Inches(0.65),
-            num, size=30, bold=True, color=color, align=PP_ALIGN.CENTER)
-        txb(s, x, Inches(2.7), box_w, Inches(0.65),
-            title, size=20, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
-        txb(s, x + Inches(0.2), Inches(3.5), box_w - Inches(0.4), Inches(2.2),
-            body, size=16, color=LIGHT_GREY, align=PP_ALIGN.CENTER, wrap=True)
-
-    txb(s, Inches(0.5), Inches(6.15), Inches(12.3), Inches(0.65),
-        "Protect €42M+ in infrastructure.  Secure the 50-year network lifespan.  Act today.",
-        size=17, bold=True, color=ACCENT2, align=PP_ALIGN.CENTER)
-
-
-# ── SLIDE 10 — Thank You ────────────────────────────────────────────────────
-def slide_thankyou(p):
-    s = blank(p)
-    bg(s)
-    accent_bar(s, Inches(0), ACCENT)
-    accent_bar(s, Inches(7.4), ACCENT2)
-
-    txb(s, Inches(0.5), Inches(1.8), Inches(12.3), Inches(1.8),
-        "Thank You", size=80, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
-
-    txb(s, Inches(0.5), Inches(3.7), Inches(12.3), Inches(0.7),
-        "Questions welcome", size=30, bold=False, color=ACCENT, align=PP_ALIGN.CENTER)
-
-    txb(s, Inches(0.5), Inches(4.6), Inches(12.3), Inches(0.55),
-        "TrenchVerify — From Site Photo to Compliance Audit — Automatically",
-        size=16, color=LIGHT_GREY, align=PP_ALIGN.CENTER)
-
-    txb(s, Inches(0.5), Inches(5.2), Inches(12.3), Inches(0.5),
-        "Team: [Name 1]  ·  [Name 2]  ·  [Name 3]",
-        size=15, color=LIGHT_GREY, align=PP_ALIGN.CENTER)
-
-    txb(s, Inches(0.5), Inches(6.55), Inches(12.3), Inches(0.4),
-        "Built at Vienna UP 2026  ·  All pilot data from APG partner dataset",
-        size=11, color=MID_GREY, italic=True, align=PP_ALIGN.CENTER)
-
-
-# ── Build ────────────────────────────────────────────────────────────────────
+# ── Build ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    deck = prs()
-    slide_title(deck)
-    slide_problem(deck)
-    slide_cost(deck)
-    slide_solution(deck)
+    deck = _prs()
+    slide_hook(deck)
     slide_pipeline(deck)
-    slide_compliance(deck)
-    slide_value(deck)
-    slide_cta(deck)
-    slide_thankyou(deck)
+    slide_numbers(deck)
+    slide_close(deck)
 
-    out = "APG_TrenchVerify_Pitch.pptx"
+    out = "Sightline_Pitch.pptx"
     deck.save(out)
-    print(f"Saved → {out}  ({len(deck.slides)} slides)")
+    print(f"Saved -> {out}  ({len(deck.slides)} slides)")

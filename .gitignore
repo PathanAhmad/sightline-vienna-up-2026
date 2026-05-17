@@ -30,3 +30,6 @@ __pycache__/
 
 # Sphinx build output
 docs/_build/
+
+# MS Office lock files (auto-created when a .pptx/.docx is open)
+~$*
