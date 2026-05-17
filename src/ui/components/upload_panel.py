@@ -402,7 +402,7 @@ def _summary_bar_html(uploads: list[dict]) -> str:
 def _process_lot_upload(uploaded_file: Any) -> None:
     """Handle Step 1's uploader: a single APG lot zip.
 
-    Accepts the as-shipped APG zip (the one that contains the three
+    Accepts the as-shipped ÖGIG zip (the one that contains the three
     `*_geojson.zip` files or the raw geojsons). Extracts the geojsons to
     a temp dir via [[lot_bundle.extract_lot_bundle]] and sets
     `session_lot` -- same shape the bundle-fallback path in
@@ -422,7 +422,7 @@ def _process_lot_upload(uploaded_file: Any) -> None:
     raw = uploaded_file.getvalue()
     if not lot_bundle.is_lot_bundle(name, raw):
         st.error(
-            f"{name} doesn't look like an APG lot zip "
+            f"{name} doesn't look like an ÖGIG lot zip "
             "(no Trenches geojson found inside).",
             icon="⚠️",
         )
@@ -853,17 +853,17 @@ def render(geom_handle: dict | None) -> None:
         st.markdown(
             "<div class='upload-rail-step'>"
             "<span class='step-num'>1</span>"
-            "<span class='step-title'>Load APG lot</span>"
+            "<span class='step-title'>Load ÖGIG lot</span>"
             "</div>"
             "<div class='upload-rail-help'>"
-            "The CLP&hellip;.zip APG ships with the three trench &amp; "
+            "The CLP&hellip;.zip ÖGIG ships with the three trench &amp; "
             "polygon geojsons inside. Defines which segments your "
             "photos snap to."
             "</div>",
             unsafe_allow_html=True,
         )
         lot_file = st.file_uploader(
-            "Drop the APG lot zip",
+            "Drop the ÖGIG lot zip",
             type=["zip"],
             accept_multiple_files=False,
             key="dashboard_lot_upload",
@@ -881,7 +881,7 @@ def render(geom_handle: dict | None) -> None:
             "<div class='upload-rail-help'>"
             "Photos (JPG / JPEG / PNG) or an archive "
             "(.zip / .tar / .tgz / .tar.gz / .tar.bz2). Each photo runs "
-            "the seven APG checks &mdash; usually 6 s per photo. Segments "
+            "the seven ÖGIG checks &mdash; usually 6 s per photo. Segments "
             "the photos snap to recolor on the map."
             "</div>",
             unsafe_allow_html=True,

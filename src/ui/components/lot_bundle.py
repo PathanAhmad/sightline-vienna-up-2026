@@ -1,10 +1,10 @@
 """Detect + extract a 'contractor bundle' upload (photos + APG lot package).
 
 A lot bundle is a zip that contains both:
-  * APG's lot geojsons (Trenches, FCP_Polygons, SiteCluster_Polygons), and
+  * ÖGIG's lot geojsons (Trenches, FCP_Polygons, SiteCluster_Polygons), and
   * The contractor's trench photos.
 
-APG ships its lot package as a zip-of-zips: each geojson is wrapped in its
+ÖGIG ships its lot package as a zip-of-zips: each geojson is wrapped in its
 own per-file `.zip`. Contractors may pack things flat too, so we handle:
 
   outer.zip/
@@ -62,7 +62,8 @@ _GEOJSON_HINTS = (
 )
 
 # Match the APG lot id at the front of a filename: "CLP20417A-P1-B00".
-_LOT_ID_RE = re.compile(r"\b(CLP\d{5}[A-Z]?(?:-P\d+)?(?:-B\d+)?)", re.IGNORECASE)
+_LOT_ID_RE = re.compile(
+    r"\b(CLP\d{5}[A-Z]?(?:-P\d+)?(?:-B\d+)?)", re.IGNORECASE)
 
 
 @dataclass
@@ -174,12 +175,14 @@ def extract_lot_bundle(name: str, data: bytes) -> LotBundle | None:
                         if inner_tag is None or inner_tag in geojsons:
                             continue
                         if inner_info.file_size > MAX_BYTES_PER_MEMBER:
-                            skipped.append(f"{inner_info.filename} (too large)")
+                            skipped.append(
+                                f"{inner_info.filename} (too large)")
                             continue
                         with inner.open(inner_info) as gh:
                             gpayload = gh.read(MAX_BYTES_PER_MEMBER + 1)
                         if len(gpayload) > MAX_BYTES_PER_MEMBER:
-                            skipped.append(f"{inner_info.filename} (too large)")
+                            skipped.append(
+                                f"{inner_info.filename} (too large)")
                             continue
                         inner_base = PurePosixPath(inner_info.filename).name
                         geojsons[inner_tag] = (inner_base, gpayload)
