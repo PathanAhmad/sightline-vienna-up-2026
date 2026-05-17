@@ -16,7 +16,6 @@ The ring is an orthogonal "how confident is the location" signal, so the
 reviewer can read both axes at a glance.
 
 Public surface:
-    render_skeleton()         -- placeholder card shown while scoring runs
     render_card(results)      -- real card with verdict-colored pins
 
 The card sits between the drop zone and the per-photo verdict grid in
@@ -27,6 +26,7 @@ from __future__ import annotations
 
 import html
 import json
+import sys
 from pathlib import Path
 
 import folium
@@ -300,37 +300,46 @@ def _pin_tooltip_html(p: dict) -> str:
     )
 
 
+# ---- CSS for the card-internal elements -----------------------------------
+
+# The map card's legend strip and off-grid footer reference these classes.
+# Injected once per render via st.markdown; tokens follow upload_view.py's
+# CSS-variable palette so the card looks like part of the surrounding page.
+_CARD_CSS = """
+<style>
+.upload-map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 0;
+    margin: 6px 0 12px 0;
+    padding-bottom: 4px;
+}
+.upload-map-offgrid {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: var(--c-bg, #f8fafc);
+    border: 1px solid var(--c-border, #e2e8f0);
+    border-radius: 6px;
+    color: var(--c-text-2, #475569);
+    font-size: 12px;
+    line-height: 1.55;
+}
+.upload-map-offgrid + .upload-map-offgrid {
+    margin-top: 6px;
+}
+.upload-map-offgrid b {
+    color: var(--c-text, #0f172a);
+    font-weight: 600;
+}
+.upload-map-offgrid i {
+    color: var(--c-muted, #64748b);
+    font-style: italic;
+}
+</style>
+"""
+
+
 # ---- Public API -----------------------------------------------------------
-
-def render_skeleton(*, num_label: str = "03 &middot; Photos on the map") -> None:
-    """Placeholder card shown while the batch is still scoring.
-
-    Keeps the page layout stable so cards don't pop in once scoring ends.
-    The card body shows a soft shimmer block and a "plotting" status line.
-
-    Uses a distinct container key (`card_map_loading`) from the real card
-    (`card_map`) -- Streamlit's element registry doesn't unregister keys
-    when a slot is replaced, so a shared key would raise
-    `StreamlitDuplicateElementKey` once scoring finishes.
-    """
-    with st.container(border=True, key="card_map_loading"):
-        _card_head(
-            num_label,
-            "Where your batch landed",
-            "GPS read from each photo&rsquo;s burned-in overlay",
-        )
-        st.markdown(_legend_html(), unsafe_allow_html=True)
-        st.markdown(
-            "<div class='upload-map-skeleton' role='status' "
-            "aria-label='Plotting batch on the map'>"
-            "<div class='upload-map-skeleton-shimmer'></div>"
-            "<div class='upload-map-skeleton-msg'>"
-            "<span class='upload-map-spinner'></span>"
-            "Plotting your batch on the map…"
-            "</div></div>",
-            unsafe_allow_html=True,
-        )
-
 
 def _pin_from_result(r: dict) -> tuple[dict, str] | tuple[None, str]:
     """Resolve one upload result to a pin dict, or signal why we couldn't.
@@ -396,7 +405,20 @@ def render_card(
         else:
             no_address.append(r["name"])
 
+    n_overlay = sum(1 for p in pins if p.get("coord_source") == "overlay_latlon")
+    n_geocoded = sum(1 for p in pins if p.get("coord_source") == "geocoded_address")
+    # Streamlit silences stdout from script reruns -- emit on stderr so the
+    # stage line surfaces in the terminal during a live demo.
+    print(
+        f"[upload_map] {len(pins)} pinned "
+        f"(overlay={n_overlay}, geocoded={n_geocoded}); "
+        f"{len(uncached_address)} address-uncached, "
+        f"{len(no_address)} no-signal",
+        file=sys.stderr, flush=True,
+    )
+
     with st.container(border=True, key="card_map"):
+        st.markdown(_CARD_CSS, unsafe_allow_html=True)
         _card_head(
             num_label,
             "Where your batch landed",
