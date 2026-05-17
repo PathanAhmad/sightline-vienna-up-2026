@@ -197,9 +197,14 @@ def _nominatim_call(q: str) -> dict | None:
 class Geocoder:
     """Cached forward-geocoder. Throttles uncached calls to 1.1s."""
 
-    def __init__(self) -> None:
+    def __init__(self, network_disabled: bool = False) -> None:
         self.cache = _load_cache()
         self._last_call = 0.0
+        # When True, cache hits are still used but uncached addresses
+        # return None instead of making a fresh Nominatim call. Lets us
+        # run a pipeline through when the public endpoint has us
+        # rate-limited without polluting the cache with synthetic nulls.
+        self.network_disabled = network_disabled
 
     def __call__(self, address: str) -> dict | None:
         if not address:
@@ -207,6 +212,8 @@ class Geocoder:
         key = address.strip()
         if key in self.cache:
             return self.cache[key] or None
+        if self.network_disabled:
+            return None
         # Throttle. Sleep relative to last network call only.
         wait = NOMINATIM_THROTTLE_S - (time.time() - self._last_call)
         if wait > 0:
@@ -214,6 +221,12 @@ class Geocoder:
         try:
             result = _nominatim_call(key)
         except Exception as e:
+            # Throttle applies to failures too -- otherwise a 429 burst
+            # makes us hammer Nominatim with rapid retries (1 req/sec
+            # cap is enforced server-side, ignoring it just deepens the
+            # ban). Stamp _last_call before returning so the next call
+            # waits the full interval.
+            self._last_call = time.time()
             # NDA: don't echo full address to stdout/stderr (the terminal can
             # end up in screenshots, demo recordings, or pasted bug reports).
             redacted = (key[:3] + "...") if len(key) > 3 else "..."
@@ -316,8 +329,22 @@ def _assign_fcp(point_utm, fcps_utm, cluster_utm) -> tuple[str, str]:
 
 
 def main() -> int:
+    import argparse
     import geopandas as gpd
     from shapely.geometry import Point
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--no-geocode", action="store_true",
+        help=(
+            "Skip fresh Nominatim calls; use only addresses already in "
+            "the persistent cache. Use this when the public endpoint "
+            "has rate-limited the host. Photos with addresses not in "
+            "the cache and no overlay lat/lon will drop with "
+            "coord_source='none'."
+        ),
+    )
+    args = ap.parse_args()
 
     ensure_dirs()
 
@@ -325,7 +352,13 @@ def main() -> int:
         print(f"[geomatch] {READQC_JSONL.name} missing -- run readqc first", file=sys.stderr)
         return 1
 
-    log_stage_start("geomatch", utm_epsg=UTM_EPSG, mismatch_threshold_m=LATLON_VS_ADDRESS_DIST_M)
+    log_stage_start(
+        "geomatch", utm_epsg=UTM_EPSG,
+        mismatch_threshold_m=LATLON_VS_ADDRESS_DIST_M,
+        no_geocode=args.no_geocode,
+    )
+    if args.no_geocode:
+        print("[geomatch] --no-geocode: only cached addresses will resolve.")
     print("[geomatch] loading geo + readqc rows ...")
     trenches, fcps, cluster = load_geo()
     trenches_utm = _project_to_utm(trenches)
@@ -347,7 +380,7 @@ def main() -> int:
     for pid, cid in cluster_of_photo.items():
         photos_in_cluster.setdefault(cid, []).append(pid)
 
-    geocoder = Geocoder()
+    geocoder = Geocoder(network_disabled=args.no_geocode)
     rep_rows: list[dict] = []  # geomatch rows for representatives only
 
     n_overlay = n_geocoded = n_none = n_off_cluster = n_flag = 0
@@ -398,6 +431,22 @@ def main() -> int:
             candidates = trenches_utm
 
         idx, seg_t, snap_d = _snap_one(point_utm, candidates)
+        if idx == -1:
+            # _snap_one returns idx=-1 when every distance came back NaN
+            # (invalid projected point) or candidates was empty. Treat
+            # as drop_no_coords and continue -- crashing the whole batch
+            # on one bad photo would lose every prior cached lookup.
+            rep_rows.append({
+                "photo_id": photo_id, "lat": "", "lon": "",
+                "coord_source": "none", "segment_id": "", "segment_t": "",
+                "snap_distance_m": "", "fcp_name": "", "fcp_assignment": "",
+                "label_match": "no_label", "latlon_vs_address_flag": False,
+            })
+            n_none += 1
+            log_event("geomatch", "drop_snap_failed", photo_id=photo_id,
+                      had_address=bool(address),
+                      had_overlay_latlon=bool(qc.get("overlay_latlon")))
+            continue
         seg_id = trenches_utm.loc[idx, "externalID"]
         snapped_fcp = trenches_utm.loc[idx, "fcp_name"]
         snapped_r   = trenches_utm.loc[idx, "ductMainShort"] or ""

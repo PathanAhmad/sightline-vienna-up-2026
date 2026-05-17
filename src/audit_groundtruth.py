@@ -29,6 +29,14 @@ GT_ROOT = DATA_DIR / "Resources" / "examples"
 DEPTH_DIR = GT_ROOT / "depth"
 DUCT_DIR = GT_ROOT / "duct"
 BENCHMARK_JSON = PROCESSED_DIR / "model_benchmark.json"
+# Side files populated by scripts/bench_sonnet_on_gt.py — one row per
+# (photo_id, model) when re-scoring the GT set with a model that didn't
+# get it from production, plus per-model elapsed_s + cost_usd. We read
+# them here so the bench-only Sonnet rows count toward Sonnet accuracy
+# without polluting readqc.jsonl (which is the production pipeline's
+# input — last-write-wins on photo_id).
+BENCH_JSONL = PROCESSED_DIR / "readqc_bench.jsonl"
+BENCH_TIMINGS = PROCESSED_DIR / "bench_timings.json"
 
 DUCT_PHASES_LENIENT = {"duct_laid", "sand_bedded", "tape_laid"}
 
@@ -42,14 +50,35 @@ def sha1_bytes(p: Path) -> str:
 
 
 def load_readqc_rows() -> list[dict]:
-    rows: list[dict] = []
-    with READQC_JSONL.open(encoding="utf-8") as fh:
-        for line in fh:
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
+    """Merge production + bench scoring rows, dedup by (photo_id, model).
+
+    Bench rows win over production rows for the same (photo_id, model)
+    because bench is the controlled run we trust for benchmark stats.
+    Different models on the same photo are kept — that's the point of
+    the bench, to compare them.
+    """
+    merged: dict[tuple[str, str], dict] = {}
+    for path in (READQC_JSONL, BENCH_JSONL):
+        if not path.exists():
+            continue
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                key = (r.get("photo_id", ""), r.get("model", ""))
+                merged[key] = r  # BENCH_JSONL iterated second → wins
+    return list(merged.values())
+
+
+def _load_bench_timings() -> dict[str, dict]:
+    if not BENCH_TIMINGS.exists():
+        return {}
+    try:
+        return json.loads(BENCH_TIMINGS.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def _model_short(model_id: str) -> str:
@@ -126,6 +155,17 @@ def evaluate() -> dict:
     for m, rows in by_model.items():
         results[m] = _evaluate_one_model(rows, gt)
 
+    # Fold in per-model bench timing (wall-time + cost spent scoring the
+    # 214 GT photos with that model). These are apples-to-apples — same
+    # photo set, same exemplar prefix — so the hero KPI can show them
+    # next to accuracy instead of cumulative production totals.
+    timings = _load_bench_timings()
+    for short, t in timings.items():
+        r = results.setdefault(short, {})
+        r["bench_seconds"] = float(t.get("seconds") or 0.0)
+        r["bench_cost_usd"] = float(t.get("cost_usd") or 0.0)
+        r["bench_n"] = int(t.get("n") or 0)
+
     BENCHMARK_JSON.parent.mkdir(parents=True, exist_ok=True)
     with BENCHMARK_JSON.open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
@@ -140,7 +180,14 @@ def _print_summary(results: dict[str, dict]) -> None:
     print("Phase-classification accuracy by model")
     print("=" * 60)
     for model, r in sorted(results.items()):
-        print(f"\n[{model}]  ({r['n_test']} test photos)")
+        bench_s = r.get("bench_seconds", 0.0)
+        bench_c = r.get("bench_cost_usd", 0.0)
+        bench_n = r.get("bench_n", 0)
+        bench_tag = (
+            f"  ·  bench {bench_n} photos in {bench_s:.0f}s · ${bench_c:.2f}"
+            if bench_n else ""
+        )
+        print(f"\n[{model}]  ({r['n_test']} test photos){bench_tag}")
         print(f"  depth         : {r['depth']['correct']}/{r['depth']['total']}"
               f" = {r['depth']['pct']:.1f}%")
         print(f"  duct (strict) : {r['duct_strict']['correct']}/{r['duct_strict']['total']}"

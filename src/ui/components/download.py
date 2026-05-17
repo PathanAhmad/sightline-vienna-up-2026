@@ -126,14 +126,16 @@ def _build_pdf_cached(
     geomatch_recs = (
         json.loads(geomatch_payload) if geomatch_payload else None
     )
+    # readqc / forensics / geomatch are decoded above so the cache key
+    # changes when their content changes, but build_pdf only consumes
+    # the derived `intake` + `segment_addresses` -- the raw artifacts
+    # aren't part of its current signature.
+    _ = readqc, forensics, geomatch_recs
     return build_pdf(
         verdicts,
         source=source,
         intake=intake,
         segment_addresses=addresses,
-        readqc=readqc,
-        forensics=forensics,
-        geomatch=geomatch_recs,
     )
 
 

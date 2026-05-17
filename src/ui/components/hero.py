@@ -1,11 +1,18 @@
 """Hero KPI strip — Linear/Vercel-style.
 
-Layout (desktop): one row, seven cells separated by subtle hairlines.
+Layout (desktop): one row, five cells separated by subtle hairlines.
 Two dominant cells on the left split the headline into the two
 questions a reviewer actually asks: how much of the route is
-documented, and of that, how much passes.
+documented, and of that, how much passes. Three secondary cells
+break the verdict mix (Green / Yellow / Red).
 
-    [ 9% │ COVERAGE ] [ 31% │ QUALITY ] │ Green │ Yellow │ Red │ Sonnet 2m·$0.20 │ Haiku 5m·$0.61
+    [ 9% │ COVERAGE ] [ 31% │ QUALITY ] │ Green │ Yellow │ Red
+
+Per-model accuracy / cost / time used to live in two more cells, but
+that comparison is a *pitch* moment, not an operating dashboard
+fixture. The numbers still get written to
+`data/processed/model_benchmark.json` by `src.audit_groundtruth` for
+slide use.
 
 Why two numbers, not one "% compliant": dividing GREEN by all planned
 segments collapses coverage (was a photo even taken?) and quality
@@ -39,7 +46,7 @@ CSS = """
 }
 @media (min-width: 48rem) {
     .hero {
-        grid-template-columns: auto auto repeat(5, 1fr);
+        grid-template-columns: auto auto repeat(3, 1fr);
         gap: 0;
         column-gap: clamp(14px, 1.4vw, 28px);
     }
@@ -136,10 +143,11 @@ CSS = """
     line-height: 1.1;
 }
 .hero-stat-sub {
-    font-size: clamp(10px, 0.72vw, 11.5px);
-    color: var(--c-muted);
+    font-size: clamp(11.5px, 0.88vw, 13px);
+    color: var(--c-text);
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
-    margin-top: -2px;
+    margin-top: 1px;
 }
 </style>
 """
@@ -149,16 +157,23 @@ CSS = """
 class ModelSpend:
     """Cost + wall-time spent on one Claude model variant.
 
-    `accuracy_pct` is the model's phase-classification accuracy on the
-    219-photo hand-labeled ground-truth set
-    (`data/Resources/examples/{depth,duct}/`). None means we don't have
-    a measurement yet for this model.
+    Production fields (`n_photos`, `cost_usd`, `seconds`) aggregate
+    every photo the pipeline scored with this model.
+
+    Benchmark fields (`accuracy_pct`, `accuracy_n_test`, `bench_seconds`,
+    `bench_cost_usd`) come from `audit_groundtruth.py` — the model was
+    run on the SAME 214 hand-labeled ground-truth photos under
+    `data/Resources/examples/{depth,duct}/`, so accuracy and timing are
+    apples-to-apples across models. None means we don't have a
+    measurement yet for this model.
     """
     n_photos: int
     cost_usd: float
     seconds: float
     accuracy_pct: float | None = None
     accuracy_n_test: int | None = None
+    bench_seconds: float | None = None
+    bench_cost_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -225,16 +240,6 @@ def render(s: HeroStats) -> None:
               <span class="dot red"></span>Red</span>
             <span class="hero-stat-num">{s.n_red:,}</span>
           </div>
-          <div class="hero-stat">
-            <span class="hero-stat-label">Sonnet</span>
-            <span class="hero-stat-num">{_fmt_accuracy(s.sonnet)}</span>
-            <span class="hero-stat-sub">{_fmt_model_sub(s.sonnet)}</span>
-          </div>
-          <div class="hero-stat">
-            <span class="hero-stat-label">Haiku</span>
-            <span class="hero-stat-num">{_fmt_accuracy(s.haiku)}</span>
-            <span class="hero-stat-sub">{_fmt_model_sub(s.haiku)}</span>
-          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -248,12 +253,18 @@ def _fmt_accuracy(m: ModelSpend) -> str:
 
 
 def _fmt_model_sub(m: ModelSpend) -> str:
-    """One line: '<accuracy label> · <time> · $<cost>' or fallback."""
-    bits: list[str] = []
-    if m.accuracy_n_test is not None and m.accuracy_pct is not None:
-        bits.append(f"on {m.accuracy_n_test} labeled")
-    if m.seconds > 0:
-        bits.append(_fmt_time(m.seconds))
-    if m.cost_usd > 0:
-        bits.append(f"${m.cost_usd:.2f}")
-    return " · ".join(bits) if bits else "no data"
+    """Single line summarising the apples-to-apples bench run.
+
+    Format: '<N> photos · <time> · $<cost>' — wall time and cost for
+    scoring the same N hand-labeled ground-truth photos the accuracy %
+    is computed on. Production totals are intentionally NOT shown: the
+    point is the comparison between models on the same dataset.
+    """
+    if m.accuracy_n_test is None or m.accuracy_pct is None:
+        return "no benchmark yet"
+    bits = [f"{m.accuracy_n_test} photos"]
+    if m.bench_seconds is not None and m.bench_seconds > 0:
+        bits.append(_fmt_time(m.bench_seconds))
+    if m.bench_cost_usd is not None and m.bench_cost_usd > 0:
+        bits.append(f"${m.bench_cost_usd:.2f}")
+    return " · ".join(bits)

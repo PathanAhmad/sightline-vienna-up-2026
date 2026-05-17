@@ -228,6 +228,8 @@ def _spend_by_model(readqc: list[dict], audit_path: Path) -> dict[str, ModelSpen
             seconds=seconds.get(m, 0.0),
             accuracy_pct=benchmark.get(_model_short(m), {}).get("pct"),
             accuracy_n_test=benchmark.get(_model_short(m), {}).get("n_test"),
+            bench_seconds=benchmark.get(_model_short(m), {}).get("bench_seconds"),
+            bench_cost_usd=benchmark.get(_model_short(m), {}).get("bench_cost_usd"),
         )
         for m in (SONNET_MODEL_ID, HAIKU_MODEL_ID)
     }
@@ -263,11 +265,15 @@ def _load_model_benchmark() -> dict[str, dict]:
     for model, r in raw.items():
         n_test = r.get("n_test") or 0
         overall = r.get("overall_strict") or {}
+        bench_s = r.get("bench_seconds")
+        bench_c = r.get("bench_cost_usd")
         # 0 test photos == no measurement, not "0% accuracy". Hero
         # renders '—' for None and a real % otherwise.
         out[model] = {
             "pct": overall.get("pct") if n_test > 0 else None,
             "n_test": n_test if n_test > 0 else None,
+            "bench_seconds": bench_s if bench_s and bench_s > 0 else None,
+            "bench_cost_usd": bench_c if bench_c and bench_c > 0 else None,
         }
     return out
 

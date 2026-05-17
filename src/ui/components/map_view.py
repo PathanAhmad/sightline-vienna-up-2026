@@ -52,7 +52,13 @@ def build_map(
     are still drawn — they remain useful spatial context for "what
     *was* documented vs. what wasn't."
     """
-    feature_collection = {"type": "FeatureCollection", "features": []}
+    # Split trunk vs house-connection segments into separate feature
+    # collections so the folium layer control can toggle house drops
+    # independently. Default is trunk-only -- per the pitch direction,
+    # APG/ÖGIG cares about the backbone; service drops to individual
+    # homes are last-mile work that clutters the map.
+    trunk_fc = {"type": "FeatureCollection", "features": []}
+    home_fc = {"type": "FeatureCollection", "features": []}
     for feat in trenches["features"]:
         # Real Trenches.geojson uses `externalID` (verified 2026-05-15);
         # `globalID` and `segment_id` are kept as fallbacks for the demo
@@ -87,7 +93,10 @@ def build_map(
                 "reasons": v_row.get("reasons", ""),
             },
         }
-        feature_collection["features"].append(enriched)
+        if props.get("isConnectedToHome"):
+            home_fc["features"].append(enriched)
+        else:
+            trunk_fc["features"].append(enriched)
 
     # Map center: cluster centroid (rough)
     try:
@@ -130,8 +139,9 @@ def build_map(
     ).add_to(m)
 
     folium.GeoJson(
-        feature_collection,
+        trunk_fc,
         name="Trench segments",
+        show=True,
         style_function=lambda f: _style_for_segment(
             f["properties"].get("verdict", "RED")
         ),
@@ -143,6 +153,29 @@ def build_map(
         ),
     ).add_to(m)
 
+    # House connections live on their own layer, hidden by default.
+    # Folium's LayerControl renders a checkbox so the user can toggle
+    # them on when a service drop becomes relevant. Same style + click
+    # behavior as trunk segments -- only the layer visibility differs.
+    folium.GeoJson(
+        home_fc,
+        name="House connections",
+        show=False,
+        style_function=lambda f: _style_for_segment(
+            f["properties"].get("verdict", "RED")
+        ),
+        highlight_function=lambda _f: {"weight": 10, "color": "#1e293b"},
+        tooltip=folium.GeoJsonTooltip(
+            fields=["segment_id", "fcp_name", "verdict", "length_m"],
+            aliases=["Segment", "FCP", "Verdict", "Length (m)"],
+            sticky=True,
+        ),
+    ).add_to(m)
+
+    # Photo snap markers (the small dark dots) live on their own layer
+    # so the operator can toggle them off via the layer control when the
+    # network coloring is the focus.
+    photo_layer = folium.FeatureGroup(name="Photo locations", show=True)
     for pt in photo_points:
         folium.CircleMarker(
             location=[pt["lat"], pt["lon"]],
@@ -151,7 +184,8 @@ def build_map(
             weight=0.5,
             fillColor="#1e293b",
             fillOpacity=0.7,
-        ).add_to(m)
+        ).add_to(photo_layer)
+    photo_layer.add_to(m)
 
     # Live uploads -- bigger, brighter, on top so the operator sees
     # exactly where their drop landed.
