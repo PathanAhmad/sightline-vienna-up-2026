@@ -44,8 +44,13 @@ def main() -> int:
         r = json.loads(line)
         preds_by_model[r["model"]][r["photo_id"]] = r
 
+    n_depth = sum(1 for lbl in gt.values() if lbl == "depth")
+    n_duct = sum(1 for lbl in gt.values() if lbl == "duct")
     print("=" * 72)
-    print(f"False-positive stats · 214 GT photos (depth=114, duct=100)")
+    print(
+        f"False-positive stats · {len(gt)} GT photos "
+        f"(depth={n_depth}, duct={n_duct})"
+    )
     print("=" * 72)
 
     for model in sorted(preds_by_model.keys()):
