@@ -174,8 +174,12 @@ def render(
                 # looks identical and the click feels broken. Consumed
                 # once by app.py's focus_bounds path.
                 st.session_state["_fly_to_segment"] = seg_id
-                # Also reset the click-handler's "last seen click" so a
-                # later real map click on the same segment still opens
-                # the panel (st_folium replays its last click payload).
-                st.session_state["_last_map_click_seg"] = seg_id
+                # NOTE: deliberately do NOT touch _last_map_click_seg.
+                # st_folium replays its last click payload on every
+                # rerun; the click-handler in app.py uses
+                # _last_map_click_seg to suppress that replay. If we
+                # overwrote it with the tour pick, the previously
+                # clicked segment's replay would no longer match and
+                # would re-overwrite selected_segment, fighting the
+                # tour pick on the very next frame.
                 st.rerun()
