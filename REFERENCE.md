@@ -17,7 +17,7 @@ photos/ + 3 GeoJSONs
       │        →  forensics.jsonl  (one row per photo, marks representatives)
       ▼
 [3 READ/QC]  Claude vision, ONE call per representative
-      │        →  readqc.jsonl  (10 enum fields + 4 overlay fields + note per photo)
+      │        →  readqc.jsonl  (9 enum + 1 numeric + 4 overlay + note per photo)
       ▼
 [4 GEOMATCH] parse overlay latlon → else Nominatim → snap to LineString
       │        →  geomatch.csv  (photo → segment_id + position t)
