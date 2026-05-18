@@ -14,7 +14,7 @@ Field crews shoot thousands of compliance photos per project. A reviewer normall
 - **[`src/`](src/)** — pipeline modules (one stage per file: `forensics`, `readqc`, `geomatch`, `classify`, `report`, `pdf_report`, …).
 - **[`scripts/`](scripts/)** — benchmark scripts (Sonnet vs Haiku vs GPT-4o on the 214-photo ground-truth set), deck builders, dev harnesses.
 - **[`samples/sightline-deficiency-report.pdf`](samples/sightline-deficiency-report.pdf)** — example output the reviewer downloads from the dashboard.
-- **[`docs/`](docs/)** — Sphinx workflow + features documentation ([published here](https://pathanahmad.github.io/vienna-up-2026/)).
+- **[`docs/`](docs/)** — Sphinx workflow + features documentation ([published here](https://pathanahmad.github.io/sightline-vienna-up-2026/)).
 - **[`Sightline_Pitch.pptx`](Sightline_Pitch.pptx)** — the 4-slide deck from the Sunday pitch (`generate_ppt.py` rebuilds it).
 - **[`SPEECH.md`](SPEECH.md)** — the 3-minute speech, beat by beat.
 
