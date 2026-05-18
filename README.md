@@ -1,46 +1,42 @@
-# Vienna UP / Europe Tech Hackathon 2026
+# Sightline
 
-48 hours. Vienna. 15–17 May 2026. Working from **ÖBB Open Innovation Factory**, Lassallestraße 5, 1020 Wien.
+**Automated trench-photo QC for network operators.** Built in 48 hours at the [Vienna UP / Europe Tech Hackathon 2026](https://viennaup.com/), 15–17 May 2026 (Challenge 2: *AI-Powered Construction Photo Compliance Audit*).
 
-## What we're doing
+Field crews shoot thousands of compliance photos per project. A reviewer normally walks each segment by hand to confirm that the right evidence exists (warning tape, sand bedding, depth reference, sealed ducts, …) and that nothing is missing. Sightline ingests the photo batch + a GeoJSON route, runs each photo through Claude vision, classifies every trench segment **green / yellow / red**, and produces a reviewer-ready deficiency report.
 
-**Challenge 2: AI-Powered Construction Photo Compliance Audit** for **APG (Austrian Power Grid)**.
+- **Pilot dataset:** 3,929 fiber-trench photos (Maria Rain, Carinthia — CLP20417A) + 223 labeled exemplars + GeoJSONs from the operator partner. The full backlog at the partner sits at ~424,000 photos.
+- **Stack:** Python 3.11, Streamlit, Claude Sonnet 4.6 vision (with Haiku and GPT-4o benchmarks), geopandas / Shapely, ReportLab.
+- **Pipeline:** ingest → forensics (pHash dedup + ELA) → Claude vision QC → geomatch (overlay-OCR + geocode fallback) → segment classify (5-m density rule) → PDF deficiency report.
 
-We're building a prototype that ingests construction-site trench photos plus a GeoJSON route, runs each photo through six compliance checks, classifies each route segment **green / yellow / red**, and produces a reviewer-ready deficiency report.
+## What's in the repo
 
-- **Brief partner:** APG. High-voltage grid trenches; ~424,000 photos in their full backlog.
-- **Pilot data delivered:** 3,929 fiber-trench photos from Maria Rain, Carinthia (one project cluster, CLP20417A) + 223 labeled example photos + GeoJSONs. Stand-in dataset; the QC approach generalizes.
+- **[`app.py`](app.py)** — Streamlit app: reviewer dashboard (`/`) + operator upload view (`?view=upload`).
+- **[`src/`](src/)** — pipeline modules (one stage per file: `forensics`, `readqc`, `geomatch`, `classify`, `report`, `pdf_report`, …).
+- **[`scripts/`](scripts/)** — benchmark scripts (Sonnet vs Haiku vs GPT-4o on the 214-photo ground-truth set), deck builders, dev harnesses.
+- **[`samples/sightline-deficiency-report.pdf`](samples/sightline-deficiency-report.pdf)** — example output the reviewer downloads from the dashboard.
+- **[`docs/`](docs/)** — Sphinx workflow + features documentation ([published here](https://pathanahmad.github.io/vienna-up-2026/)).
+- **[`Sightline_Pitch.pptx`](Sightline_Pitch.pptx)** — the 4-slide deck from the Sunday pitch (`generate_ppt.py` rebuilds it).
+- **[`SPEECH.md`](SPEECH.md)** — the 3-minute speech, beat by beat.
 
-## What to read
+## How it was built (the story)
 
-1. **[CLAUDE.md](CLAUDE.md)** — hard rules we cannot get wrong. Read first.
-2. **[PLAN.md](PLAN.md)** — what we're building, by when, with what stack.
-3. **[DECISIONS.md](DECISIONS.md)** — one-line log of every decision so far. No re-litigating.
-4. **[Documentation](https://pathanahmad.github.io/vienna-up-2026/)** — Sphinx docs for the main workflow and feature set.
-
-## Schedule
-
-| When | What |
-|---|---|
-| **Fri 15 May** | Kickoff 16:00 · workshop with Martin Fuhrmann · hacking after · venue closes 23:00 |
-| **Sat 16 May** | Build day · mentoring 10:00–14:00 · **tech checkpoint 17:00** · venue closes 23:00 |
-| **Sun 17 May** | Pitch session **10:30–12:00** (3 min/team) · awards 12:30 |
-
-Venue: ÖBB Open Innovation Factory, Lassallestraße 5, 1020 Wien. Slack: `europetechhac-yix2175`.
+- **[`REFERENCE.md`](REFERENCE.md)** — code-verified architecture doc: every module, every output, every gotcha.
+- **[`HOW_IT_WORKS.md`](HOW_IT_WORKS.md)** — plain-English explainer for non-technical readers.
+- **[`BEHIND_THE_SCENES.md`](BEHIND_THE_SCENES.md)** — technical companion: the calls we made and why.
+- **[`BACKEND_LOGIC.md`](BACKEND_LOGIC.md)** — the geomatch + classify rules in one place.
+- **[`DECISIONS.md`](DECISIONS.md)** — one-line log of every product / engineering decision across the 48 hours.
+- **[`PLAN.md`](PLAN.md)** — the sprint plan we worked off (kept for the time-capsule).
+- **[`CLAUDE.md`](CLAUDE.md)** — hard rules for the AI pair-programmer.
 
 ## Run it locally
 
 ```bash
-uv sync                # install Python 3.11 deps from pyproject.toml
-streamlit run app.py   # once app.py exists
+uv sync                           # install Python 3.11 deps from pyproject.toml
+uv run streamlit run app.py       # reviewer dashboard at /, operator view at /?view=upload
 ```
 
-Anthropic API key in `.env` (Claude Sonnet 4.6 vision is the QC engine — see DECISIONS.md for the Haiku-vs-Sonnet choice).
+You'll need an Anthropic API key in `.env` (the QC engine is Claude Sonnet 4.6 vision — see [`DECISIONS.md`](DECISIONS.md) for the Haiku / Sonnet / GPT-4o comparison). Partner-provided photos and route GeoJSONs live under `Resources/` and `data/` (gitignored; NDA on the route data per the brief). The app falls back to bundled fixtures in [`demo_fixtures/`](demo_fixtures/) when those folders are missing, so the dashboard is runnable straight from a fresh clone.
 
-## Resources
+## Team
 
-`Resources/` is partner-provided data: the brief docx, the 3,929 trench photos, 223 labeled exemplars, GeoJSONs, two reference decks. **Untracked. NDA on route data per the brief.**
-
-## Evaluation rubric (Sunday)
-
-30% tech & AI · 20% problem fit · 15% UX · 15% business · 10% impact · 10% pitch. **Jury:** Jan Juriga (Wirtschaftsagentur Wien), Kati Schneeberger (BEJ), Johannes Adler (investor), Martin Fuhrmann (APG / Challenge 2 domain expert — we are literally being judged by the customer).
+Built by **Ahmad Khan Pathan** ([@PathanAhmad](https://github.com/PathanAhmad)) and **Valentino Sack** ([@vsack](https://github.com/vsack)). Pitch deck contributions from Himani Sharma. Sphinx docs + GitHub Pages workflow contributed by Evgeniy Avdeev.
