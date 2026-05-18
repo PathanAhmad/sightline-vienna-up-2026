@@ -33,3 +33,12 @@ docs/_build/
 
 # MS Office lock files (auto-created when a .pptx/.docx is open)
 ~$*
+
+# macOS Finder metadata
+.DS_Store
+
+# Stray Google Drive bulk downloads (we don't track these in git)
+drive-download-*.zip
+drive-download-*/
+PPTS/
+
