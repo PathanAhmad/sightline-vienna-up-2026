@@ -30,7 +30,7 @@ from src.paths import PROCESSED_DIR
 BENCH_JSON = PROCESSED_DIR / "model_benchmark.json"
 OUT_PDF = PROCESSED_DIR / "model_comparison.pdf"
 
-# ÖGIG accent palette, mirrors the dashboard
+# Sightline accent palette, mirrors the dashboard
 C_TEXT = colors.HexColor("#0f172a")
 C_MUTED = colors.HexColor("#64748b")
 C_ACCENT = colors.HexColor("#0ea5e9")
@@ -86,7 +86,7 @@ def _chrome(canvas, doc, generated_on: str) -> None:
     band_y = PAGE_H - MARGIN_TOP / 2
     canvas.setFont("Helvetica-Bold", 8.5)
     canvas.setFillColor(C_ACCENT)
-    canvas.drawString(MARGIN_X, band_y, "ÖGIG  ·  Photo QC")
+    canvas.drawString(MARGIN_X, band_y, "Sightline  ·  Photo QC")
     canvas.setFillColor(C_MUTED)
     canvas.setFont("Helvetica", 8.5)
     canvas.drawRightString(PAGE_W - MARGIN_X, band_y,
@@ -151,7 +151,7 @@ def build(bench: dict) -> bytes:
         leftMargin=MARGIN_X, rightMargin=MARGIN_X,
         topMargin=MARGIN_TOP, bottomMargin=MARGIN_BOTTOM,
         title="Sonnet vs Haiku — phase-classification benchmark",
-        author="ÖGIG photo-QC pipeline",
+        author="Sightline photo-QC pipeline",
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height,
                   id="main", showBoundary=0)

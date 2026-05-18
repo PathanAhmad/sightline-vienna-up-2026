@@ -2,6 +2,7 @@
 
 One line per decision. Timestamped. No re-litigating.
 
+- **2026-05-17** Rebrand: the project is **Sightline**, not "APG photo-QC." APG is no longer the named buyer; user-facing copy is product-led, with neutral "operator" framing for the customer. All UI, reports, PPT, and forward-looking docs updated. Older DECISIONS entries below still mention APG — that was the framing at the time and is preserved as history.
 - **2026-05-15** Going Challenge 2 (construction-photo QC).
 - **2026-05-15** Stack: Python 3.11 + uv, Streamlit (no FastAPI for the spine), Claude Haiku 4.5 vision as the QC engine, classical CV (`imagehash` + ELA-via-Pillow) for forensics. See [pyproject.toml](pyproject.toml).
 - **2026-05-15** No custom YOLO training. 30 hand-labels / 4 classes / 4 hours is below the practical small-data floor; VLMs win "is X present" questions; YOLO-World zero-shot is Plan B.

@@ -188,7 +188,7 @@ SUMMARY_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>ÖGIG photo-QC — summary</title>
+<title>Sightline — summary</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
          margin: 32px; color: #1e293b; }}
@@ -212,7 +212,7 @@ SUMMARY_HTML_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>ÖGIG photo-QC — summary</h1>
+<h1>Sightline — summary</h1>
 <div class="source">Source: <code>{source}</code></div>
 
 <div class="grid">

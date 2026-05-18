@@ -6,9 +6,9 @@ A no-jargon explainer of what we built. If a word looks technical, we define it 
 
 ## 1. The problem we picked
 
-A power-grid company (APG, the people who own Austria's high-voltage lines) hires contractors to dig long trenches and lay cable. To prove the work was done correctly, the contractors take photos at each stage — open trench, sand poured in, cable laid, warning tape on top, hole filled back up.
+A network operator (the kind of company that owns Austria's grid or fiber routes) hires contractors to dig long trenches and lay cable. To prove the work was done correctly, the contractors take photos at each stage — open trench, sand poured in, cable laid, warning tape on top, hole filled back up.
 
-There are **a lot** of photos. APG has roughly **424,000** of them sitting in a folder. A human reviewer looks through them one by one to answer questions like:
+There are **a lot** of photos. A single operator can have roughly **424,000** of them sitting in a folder. A human reviewer looks through them one by one to answer questions like:
 
 - Is the cable actually sitting on sand, or just on dirt?
 - Is the orange warning tape there, so the next person who digs here doesn't slice the cable?
@@ -37,7 +37,7 @@ We built two separate web pages, because there are two different people in this 
 A contractor on site finishes a stretch of trench, takes their photos, and drops them into our page. The tool reviews them on the spot and tells the contractor: "you're missing a sand-bedding photo for this section — go take one before you leave." This catches problems while the trench is still open and easy to fix. Live AI calls happen here.
 
 **Screen B — the reviewer dashboard.**
-An office reviewer at APG opens the dashboard and sees the colored map of the whole project. They click the red bits first, look at the evidence, and decide what to do. No live AI calls here — everything was pre-computed, so the page is fast.
+An office reviewer at the operator opens the dashboard and sees the colored map of the whole project. They click the red bits first, look at the evidence, and decide what to do. No live AI calls here — everything was pre-computed, so the page is fast.
 
 Both screens are the same app — you just put `?view=upload` at the end of the web address to flip between them.
 
@@ -90,7 +90,7 @@ These three are the "wow" moments — the kinds of things a human reviewer would
 
 We're being honest about scope, both to the team and on stage:
 
-- **We don't measure trench depth in centimeters.** We only check whether a depth reference (a ruler) is visible in the photo. Setting a number would need APG's specific spec, which we don't have.
+- **We don't measure trench depth in centimeters.** We only check whether a depth reference (a ruler) is visible in the photo. Setting a number would need the operator's specific spec, which we don't have.
 - **We don't do survey-grade GPS verification.** The full industry standard uses a survey instrument called "RTK GPS" — accurate to a centimeter or two. Our GPS is the kind that's printed on the photo, accurate to about 4 meters. We say this explicitly in the pitch: "We do the photo half of the check. Survey verification is a separate, future phase."
 - **We don't censor faces inside the photo file.** We flag the photo, hide it from the screen, and route it to a "needs retake" list. Actually painting black boxes over faces would need a separate tool.
 
@@ -104,7 +104,7 @@ A few decisions worth knowing because judges may ask:
 
 ## 9. The numbers from our pilot
 
-Run on the Carinthian pilot dataset that APG's partner gave us:
+Run on the Carinthian pilot dataset our partner gave us:
 
 - **3,929 photos** ingested.
 - **~600 duplicates** caught automatically (the dataset had hidden ground-truth markers we could check against).
@@ -113,4 +113,4 @@ Run on the Carinthian pilot dataset that APG's partner gave us:
 - **About $15** in AI costs.
 - **Under 30 minutes** end-to-end.
 
-For comparison, the equivalent manual review for this size of dataset would take a person 3–5 days for each major section. There are 9 major sections in this single project. APG's full backlog is roughly 100× this dataset.
+For comparison, the equivalent manual review for this size of dataset would take a person 3–5 days for each major section. There are 9 major sections in this single project. An operator's full backlog is roughly 100× this dataset.

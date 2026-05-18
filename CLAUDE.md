@@ -38,11 +38,11 @@ Open list. Add as we learn. Only things we **cannot** get wrong.
 
 ## Demo / pitch
 - **3 minutes is hard-capped.** Demo eats ≥60%. Slides are rails.
-- **Name the buyer in slide 2.** APG, not "operators." (The brief is for APG / Austrian Power Grid; the fiber-trench data we received is the working pilot. Approach generalizes.)
+- **Lead with the product, not a named buyer.** Slide 2 names **Sightline** and the operator pain. (Older rule said "name APG"; rebranded 2026-05-17 — see DECISIONS.md.)
 
 ## Tech traps (Challenge 2, post-data-drop 2026-05-15 PM)
 - **EXIF GPS is empty.** WhatsApp-style filenames in the dataset have all metadata stripped. Geomatch via overlay-OCR (street address printed on every photo) + paper-label FCP code (e.g. `F170-R084-11-or`), not EXIF.
 - **CRS is WGS84 / EPSG:4326.** No Lambert 31287 reprojection needed for this dataset.
-- **APG trench-depth spec is unknown.** Don't hard-code a number until Martin gives one. The depth check is "is a depth reference visible / readable" — no threshold.
+- **Operator trench-depth spec is unknown.** Don't hard-code a number until Martin gives one. The depth check is "is a depth reference visible / readable" — no threshold.
 - **NDA on route data.** Don't paste `Resources/` contents into pastebins, public tools, third-party services, or screenshots that leak street-level paths. The brief flags this explicitly.
 - **No `pip install` on venue Wi-Fi.** Use `uv sync` against a pre-warmed lock file.

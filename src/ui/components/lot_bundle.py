@@ -1,11 +1,12 @@
-"""Detect + extract a 'contractor bundle' upload (photos + APG lot package).
+"""Detect + extract a 'contractor bundle' upload (photos + operator lot package).
 
 A lot bundle is a zip that contains both:
-  * ÖGIG's lot geojsons (Trenches, FCP_Polygons, SiteCluster_Polygons), and
+  * The operator's lot geojsons (Trenches, FCP_Polygons, SiteCluster_Polygons), and
   * The contractor's trench photos.
 
-ÖGIG ships its lot package as a zip-of-zips: each geojson is wrapped in its
-own per-file `.zip`. Contractors may pack things flat too, so we handle:
+The operator ships its lot package as a zip-of-zips: each geojson is wrapped
+in its own per-file `.zip`. Contractors may pack things flat too, so we
+handle:
 
   outer.zip/
     CLP..._Trenches_geojson.zip      <- nested zip wrapping the geojson
@@ -23,7 +24,7 @@ or:
     IMG-001.jpg
     ...
 
-or just the APG lot package alone (no photos), or just photos (no
+or just the operator's lot package alone (no photos), or just photos (no
 geojsons -- in which case `extract_lot_bundle` returns None and the caller
 falls back to plain-photo handling).
 
@@ -61,9 +62,8 @@ _GEOJSON_HINTS = (
     ("cluster",      "SiteCluster"),
 )
 
-# Match the APG lot id at the front of a filename: "CLP20417A-P1-B00".
-_LOT_ID_RE = re.compile(
-    r"\b(CLP\d{5}[A-Z]?(?:-P\d+)?(?:-B\d+)?)", re.IGNORECASE)
+# Match the operator lot id at the front of a filename: "CLP20417A-P1-B00".
+_LOT_ID_RE = re.compile(r"\b(CLP\d{5}[A-Z]?(?:-P\d+)?(?:-B\d+)?)", re.IGNORECASE)
 
 
 @dataclass

@@ -88,7 +88,7 @@ EXEMPLARS = [
      "Duct laid in trench with visible sand bedding -- phase=sand_bedded."),
     ("duct_depth_rod_prominent", EXEMPLARS_DIR / "duct_depth.jpg",
      "Trench with prominent measuring rod composition AND duct visible at "
-     "bottom -- phase=depth_measure. APG labels rod-prominent frames as "
+     "bottom -- phase=depth_measure. The operator labels rod-prominent frames as "
      "depth_measure even when ducts are also present; the rod composition "
      "is the documented activity."),
     ("warnband", EXEMPLARS_DIR / "warnband.jpeg",

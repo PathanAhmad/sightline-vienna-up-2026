@@ -104,5 +104,5 @@ The reporting stage produces reviewer artifacts under
 * ``summary.html`` for a compact overview.
 
 These outputs support the app's review flow and provide a handoff artifact for
-APG or partner reviewers.
+operator or partner reviewers.
 

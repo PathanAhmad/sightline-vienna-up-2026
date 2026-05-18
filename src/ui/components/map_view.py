@@ -55,7 +55,7 @@ def build_map(
     # Split trunk vs house-connection segments into separate feature
     # collections so the folium layer control can toggle house drops
     # independently. Default is trunk-only -- per the pitch direction,
-    # APG/ÖGIG cares about the backbone; service drops to individual
+    # the operator cares about the backbone; service drops to individual
     # homes are last-mile work that clutters the map.
     trunk_fc = {"type": "FeatureCollection", "features": []}
     home_fc = {"type": "FeatureCollection", "features": []}

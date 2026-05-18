@@ -5,7 +5,7 @@ This is the *contractor / foreman* surface from the brief's deliverable #1:
 with basic metadata: project name, lot ID, GPS coordinates if available."
 
 The reviewer dashboard (rendered by the rest of `app.py`) is the second
-surface — the APG-side triage view. Two tabs, two roles, same product.
+surface — the reviewer-side triage view. Two tabs, two roles, same product.
 Demo flow: open `localhost:8501/?view=upload` in one tab and
 `localhost:8501/` in another.
 
@@ -378,7 +378,7 @@ def render() -> None:
 
     topbar.render(
         project_name="Operator submission",
-        project_location="Drop photos · we route to ÖGIG review",
+        project_location="Drop photos · we route to reviewer",
         source="upload",
     )
 
@@ -387,7 +387,7 @@ def render() -> None:
         "<div class='upload-hero'>"
         "<div class='eyebrow'>Step 1 of 2 &middot; Operator view</div>"
         "<h1>Submit your batch for compliance review.</h1>"
-        "<p>Photos go through the same seven-check QC pipeline ÖGIG&rsquo;s "
+        "<p>Photos go through the same seven-check Sightline QC pipeline "
         "reviewers see &mdash; warning tape, sand bedding, side view, depth "
         "reference, duct, pipe-ends sealed, and personal-data check &mdash; "
         "and land in the reviewer dashboard ready for triage.</p>"
@@ -449,7 +449,7 @@ def render() -> None:
             "Drag a batch of photos &mdash; or one archive containing "
             "them &mdash; onto the area below, or press <kbd>Upload</kbd> "
             "to browse. Each photo runs through Claude Sonnet 4.6 vision "
-            "and is scored against the seven ÖGIG / NIS2 checks &mdash; "
+            "and is scored against the seven Sightline / NIS2 checks &mdash; "
             "usually under six seconds per photo."
             "</div>",
             unsafe_allow_html=True,
@@ -553,7 +553,7 @@ def render() -> None:
             _card_head(
                 "04 · Per-photo verdicts",
                 "Results",
-                "Each photo scored against the seven ÖGIG / NIS2 checks",
+                "Each photo scored against the seven Sightline / NIS2 checks",
             )
 
             _render_summary_bar(results)

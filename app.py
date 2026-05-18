@@ -7,7 +7,7 @@ Two surfaces, switched by `?view=` query param:
     /?view=upload      → operator submission form (drop photos, get verdicts)
 
 The two-surface split mirrors the brief's two implied roles — contractor
-who submits, APG reviewer who triages. Demo: open both URLs in two
+who submits, operator-side reviewer who triages. Demo: open both URLs in two
 browser tabs, narrate the role swap.
 
 Dashboard rendering lives directly in `main()` below; the upload view is
@@ -366,7 +366,7 @@ def main() -> None:
 
     if view == "upload":
         st.set_page_config(
-            page_title="ÖGIG photo-QC · Submit batch",
+            page_title="Sightline · Submit batch",
             layout="wide",
             initial_sidebar_state="collapsed",
         )
@@ -379,7 +379,7 @@ def main() -> None:
 
     # ---- Reviewer dashboard ----
     st.set_page_config(
-        page_title="ÖGIG photo-QC · Reviewer dashboard",
+        page_title="Sightline · Reviewer dashboard",
         layout="wide",
         initial_sidebar_state="collapsed",
     )

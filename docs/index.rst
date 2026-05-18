@@ -1,7 +1,7 @@
 Vienna UP 2026 Photo QC Documentation
 ======================================
 
-This documentation describes the APG construction-photo compliance audit
+This documentation describes the Sightline construction-photo compliance audit
 prototype built during Vienna UP / Europe Tech Hackathon 2026.
 
 The app ingests trench-site photos and route GeoJSON data, checks the evidence

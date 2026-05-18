@@ -50,7 +50,7 @@ That's the whole stack. Notably absent: no GPU, no custom-trained model, no clou
 - **GPS formats** the AI handles: four (degrees-with-dots, degrees-with-commas-for-the-decimal which is the German locale, plain decimal, labeled decimal)
 - **Manual baseline** for the same review: 3–5 days per project zone. Nine zones is roughly a month of full-time human work per project.
 
-To scale this to APG's full 424,000-photo backlog: same code, more time. Roughly **$1,900** in AI fees and **a few days** of laptop time. No re-engineering needed.
+To scale this to an operator's full 424,000-photo backlog: same code, more time. Roughly **$1,900** in AI fees and **a few days** of laptop time. No re-engineering needed.
 
 ## 4. The tricky problems and how we got past them
 
