@@ -1,6 +1,6 @@
 """Topbar — slim single row at the top.
 
-    ÖGIG · TRENCH QC    Project · Location              [• live data]
+    SIGHTLINE · TRENCH QC    Project · Location              [• live data]
 
 One row. Wraps on mobile. Bottom border separates it from the hero.
 """
@@ -62,6 +62,27 @@ CSS = """
     margin-right: 5px;
     vertical-align: 1px;
 }
+/* Cross-view link (reviewer dashboard → operator upload, and vice-versa).
+   Sits to the right of the status pill so it reads as nav, not action. */
+.topbar-xlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-text-2);
+    text-decoration: none;
+    padding: 4px 10px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-pill);
+    background: var(--c-bg);
+    white-space: nowrap;
+    transition: color 120ms ease, border-color 120ms ease;
+}
+.topbar-xlink:hover {
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+}
 </style>
 """
 
@@ -70,6 +91,15 @@ _STATUS_PRESETS = {
     "live": ("live", "live data"),
     "fixtures": ("", "demo fixtures"),
     "upload": ("", "operator submission"),
+}
+
+
+_XLINKS: dict[str, tuple[str, str]] = {
+    # source -> (href, label). Dashboard views point operators back to
+    # upload; the upload view points reviewers at the dashboard.
+    "live":     ("/?view=upload", "← Submit photos"),
+    "fixtures": ("/?view=upload", "← Submit photos"),
+    "upload":   ("/",             "Reviewer dashboard →"),
 }
 
 
@@ -88,14 +118,25 @@ def render(
     preset_cls, preset_text = _STATUS_PRESETS.get(source, ("", source))
     cls = status_cls if status_cls is not None else preset_cls
     text = status_text if status_text is not None else preset_text
+    xlink = _XLINKS.get(source)
+    # target="_top" breaks out of Streamlit's iframe-style component
+    # context and forces a full top-level navigation — a plain in-place
+    # <a href> can otherwise change the URL without triggering a rerun,
+    # leaving the view stuck on the previous page.
+    xlink_html = (
+        f'<a class="topbar-xlink" href="{xlink[0]}" target="_top">'
+        f'{xlink[1]}</a>'
+        if xlink else ""
+    )
     st.markdown(
         f"""
         <div class="topbar">
-          <span class="topbar-brand">ÖGIG · TRENCH QC</span>
+          <span class="topbar-brand">SIGHTLINE · TRENCH QC</span>
           <span class="topbar-project">
             <b>{project_name}</b>
             <span class="loc"> · {project_location}</span>
           </span>
+          {xlink_html}
           <span class="topbar-status {cls}">
             <span class="dot"></span>{text}
           </span>

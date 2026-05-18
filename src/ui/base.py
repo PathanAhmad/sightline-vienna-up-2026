@@ -25,11 +25,19 @@ html, body, [class*="css"] {
 }
 
 /* ---- Hide Streamlit default chrome -------------------------------- */
-header[data-testid="stHeader"] {
-    background: transparent;
-    height: 0;
+/* Two selectors — Streamlit renamed the header from data-testid=stHeader
+   to class=stAppHeader in recent versions. Keep both for forward/back
+   compat. pointer-events:none is critical: even with height:0 the
+   fixed-position header was still intercepting clicks on our own topbar
+   (the cross-view nav link). */
+header[data-testid="stHeader"],
+header.stAppHeader {
+    background: transparent !important;
+    height: 0 !important;
+    pointer-events: none !important;
 }
-header[data-testid="stHeader"] [data-testid="stToolbar"] { display: none; }
+header[data-testid="stHeader"] [data-testid="stToolbar"],
+header.stAppHeader [data-testid="stToolbar"] { display: none !important; }
 [data-testid="stStatusWidget"] { display: none; }
 [data-testid="stDecoration"] { display: none; }
 footer { visibility: hidden; }
