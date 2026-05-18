@@ -46,3 +46,34 @@ Open list. Add as we learn. Only things we **cannot** get wrong.
 - **Operator trench-depth spec is unknown.** Don't hard-code a number until Martin gives one. The depth check is "is a depth reference visible / readable" — no threshold.
 - **NDA on route data.** Don't paste `Resources/` contents into pastebins, public tools, third-party services, or screenshots that leak street-level paths. The brief flags this explicitly.
 - **No `pip install` on venue Wi-Fi.** Use `uv sync` against a pre-warmed lock file.
+
+## UI / design (Sightline app)
+
+When adding components or fixing layout bugs in [`src/ui/`](src/ui/), preserve the established visual language — don't redesign as a side effect of bug-fix work:
+
+- **Linear/Vercel-style clean look.** Single accent color (`--c-accent`, sky-700 blue). The green/yellow/red palette is reserved strictly for verdict semantics — never for chrome.
+- **4pt spacing grid.** Use `--s-1` through `--s-8` from [`src/ui/tokens.py`](src/ui/tokens.py); don't invent new spacing values.
+- **Numbered card eyebrows** (`01 · BATCH DETAILS`) + small-caps `.section-head` labels.
+- **Subtle card chrome:** `--shadow-card` (layered ring + soft drop), `--r-md` radius, hairline borders.
+- **Tabular numbers** for stats; tight negative letter-spacing on big numerals.
+
+Confirmed user preference 2026-05-16: *"I actually like the colour choice, design style etc. Feels clean and professional with breathing room."* If a redesign is genuinely needed, that's a separate conversation — not a bug fix.
+
+## Pitch / slide writing
+
+When writing slide body copy, decks, or supporting text for the pitch / portfolio:
+
+- **Sharp ≠ cryptic.** Each line should make sense to a first-time viewer who has never seen the product. If a sentence only lands after seeing the dashboard, replace it.
+- **Slides scaffold the speech, they don't replicate it.** Short fragments, key numbers, single-clause statements. The speaker brings depth and tone. If the slide reads like prose, the speaker has nothing left.
+- **The hook quote is the one exception** — pure punchiness wins there, because the speaker can land it cold.
+- **Match language to the actual occasion.** Don't borrow stock CTA cliches without checking dates and context (e.g., "Friday you see the map" doesn't work for a Sunday final).
+
+Origin: 2026-05-17 Sightline slide-3 rewrite — verb-headlines were fine, but bullets like *"Pinned to the meter — not the project, not the day. The meter."* read as abstract noise to a first-time viewer.
+
+## Project mode (post-hackathon, as of 2026-05-18)
+
+The Vienna UP 2026 hackathon ended Sunday 2026-05-17. The repo is now being polished as a portfolio piece, not extended with new features. Implications:
+
+- **The Saturday-checkpoints / push-small-and-often / 17:00-spine rules above are historical.** The sprint pressure is gone — apply the rest of CLAUDE.md with that lens.
+- **Bias toward presentation quality, not new scope.** A passerby (hiring manager, fellow hacker) lands on the repo cold; README, docs, code clarity, and demo polish are what they see first.
+- **Don't expand surface area.** New features are out of scope unless they materially improve the portfolio story. Refactors, doc cleanup, and polish are in scope.
