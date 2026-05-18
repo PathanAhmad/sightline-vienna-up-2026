@@ -4,7 +4,7 @@ Open list. Add as we learn. Only things we **cannot** get wrong.
 
 ## Mindset
 - **This is your project too.** Own the call. If you see a better path, take it — don't wait to be told.
-- **Winning is the goal — not comfort, not familiarity.** The prize, the demo, and the contacts at APG / Sustainista / fellow hackers are what we're optimizing for. If the best path runs through a stack we've never touched, that's the path. We close the skill gap with teammates and Claude. No self-imposed limits because of what we shipped last project.
+- **Winning is the goal — not comfort, not familiarity.** Optimize for whatever the goal actually is in the moment (during the hackathon: prize + demo + judge contacts; now in portfolio mode: hiring-manager / passerby quality). If the best path runs through a stack we've never touched, that's the path. We close the skill gap with teammates and Claude. No self-imposed limits because of what we shipped last project.
 - **Don't infer preferences from partial signals.** A resume, a past stack, the language someone happened to use last week — none of that tells you what they'd pick for *this* problem. When in doubt, ask in one sentence. Don't decide for them.
 - **Think the maze through before entering it, then move.** A wrong fork that costs 4 hours of backtracking is more expensive than 30 minutes of upfront research. Weigh the realistic options honestly — what breaks, what scales, what's reversible — then commit and go. Indecision burns hours; but research-shopping without committing is just indecision in a lab coat. Trigger for the upfront research: any choice that locks in a stack, an API, or a data shape for more than the next hour of work.
 - **Talk simple. Talk concise.** If a teammate or judge asks what we're doing and you go blank — you don't understand it yet. Stop and re-explain it to yourself in one sentence. Then you can answer in one sentence.
@@ -32,7 +32,7 @@ Open list. Add as we learn. Only things we **cannot** get wrong.
 - **Research before coding unfamiliar tech.** Triggers: new library, version-sensitive API, CRS/EPSG, GeoJSON, Claude vision schema, OCR. Use context7 for library docs; web search otherwise. 30s of reading beats 2h of debugging.
 - **Skip flake8 for this project.** Don't run it, don't report violations, don't rewrap to satisfy E501. Long CSS blocks, regex tables, and natural-language LLM system prompts trip the 79-char rule constantly and rewrapping them just makes them harder to read on a deadline. This overrides the global "all Python must pass flake8" rule. mypy --strict still applies where it's not already noisy from missing stubs.
 
-## Saturday checkpoints (non-negotiable)
+## Saturday checkpoints (hackathon-era, historical — kept for the record)
 - **~17:00 tech checkpoint** — spine works end-to-end by then. Rough is fine.
 - **Backup demo video recorded Saturday night.** Even if the live demo "will be fine."
 
@@ -74,6 +74,6 @@ Origin: 2026-05-17 Sightline slide-3 rewrite — verb-headlines were fine, but b
 
 The Vienna UP 2026 hackathon ended Sunday 2026-05-17. The repo is now being polished as a portfolio piece, not extended with new features. Implications:
 
-- **The Saturday-checkpoints / push-small-and-often / 17:00-spine rules above are historical.** The sprint pressure is gone — apply the rest of CLAUDE.md with that lens.
+- **Several sections above are hackathon-specific** — §Saturday checkpoints, §Process's "push small and often" / 17:00-spine bias, §Mindset's "Winning is the goal" examples (APG/Sustainista/fellow hackers, Saturday-afternoon-cut framing), §Demo/pitch's 3-min hard cap. They're preserved as a historical record of how we operated during the hackathon. The sprint pressure is gone — apply the rest of CLAUDE.md with that lens.
 - **Bias toward presentation quality, not new scope.** A passerby (hiring manager, fellow hacker) lands on the repo cold; README, docs, code clarity, and demo polish are what they see first.
 - **Don't expand surface area.** New features are out of scope unless they materially improve the portfolio story. Refactors, doc cleanup, and polish are in scope.
