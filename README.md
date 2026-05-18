@@ -20,13 +20,9 @@ Field crews shoot thousands of compliance photos per project. A reviewer normall
 
 ## How it was built (the story)
 
-- **[`REFERENCE.md`](REFERENCE.md)** — code-verified architecture doc: every module, every output, every gotcha.
+- **[`REFERENCE.md`](REFERENCE.md)** — code-verified architecture deep-dive: every module, every output, every gotcha.
 - **[`HOW_IT_WORKS.md`](HOW_IT_WORKS.md)** — plain-English explainer for non-technical readers.
-- **[`BEHIND_THE_SCENES.md`](BEHIND_THE_SCENES.md)** — technical companion: the calls we made and why.
-- **[`BACKEND_LOGIC.md`](BACKEND_LOGIC.md)** — the geomatch + classify rules in one place.
 - **[`DECISIONS.md`](DECISIONS.md)** — one-line log of every product / engineering decision across the 48 hours.
-- **[`PLAN.md`](PLAN.md)** — the sprint plan we worked off (kept for the time-capsule).
-- **[`CLAUDE.md`](CLAUDE.md)** — hard rules for the AI pair-programmer.
 
 ## Run it locally
 
