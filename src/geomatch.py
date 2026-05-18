@@ -62,6 +62,12 @@ from src.paths import (
 UTM_EPSG = 32633   # WGS84 / UTM zone 33N -- correct for Carinthia, Austria
 LATLON_VS_ADDRESS_DIST_M = 150.0
 PAPER_LABEL_RE = re.compile(r"\bF(\d{3})\b.*?\bR(\d{3})\b", re.IGNORECASE)
+# fcp_name carries human suffixes like "F175 schacht"; the paper-label
+# consistency check compares against just the leading F-code.
+_FCP_LEADING_F_RE = re.compile(r"\b(F\d{3})\b", re.IGNORECASE)
+# A trench's ductMainShort can be a composite like "F:R008^R082" or
+# "R001^R101^F:R029" — split on these separators when matching paper R-codes.
+_R_CODE_SEP_RE = re.compile(r"[\^:]+")
 NOMINATIM_USER_AGENT = "ViennaUP2026/0.1 (pathanahmad2334@gmail.com)"
 NOMINATIM_THROTTLE_S = 1.1
 NOMINATIM_CACHE = PROCESSED_DIR / "nominatim_cache.json"
@@ -513,9 +519,14 @@ def main() -> int:
             label_match = "no_label"
         else:
             f_code, r_code = pl
-            if f_code != snapped_fcp:
+            snapped_fcp_m = _FCP_LEADING_F_RE.search(snapped_fcp or "")
+            snapped_fcp_token = snapped_fcp_m.group(1).upper() if snapped_fcp_m else ""
+            snapped_r_tokens = {
+                t.upper() for t in _R_CODE_SEP_RE.split(snapped_r or "") if t
+            }
+            if f_code.upper() != snapped_fcp_token:
                 label_match = "fcp_mismatch"
-            elif r_code and snapped_r and r_code.upper() != snapped_r.upper():
+            elif r_code and snapped_r_tokens and r_code.upper() not in snapped_r_tokens:
                 label_match = "r_mismatch"
             else:
                 label_match = "ok"
