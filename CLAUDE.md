@@ -74,6 +74,6 @@ Origin: 2026-05-17 Sightline slide-3 rewrite — verb-headlines were fine, but b
 
 The Vienna UP 2026 hackathon ended Sunday 2026-05-17. The repo is now being polished as a portfolio piece, not extended with new features. Implications:
 
-- **Several sections above are hackathon-specific** — §Saturday checkpoints, §Process's "push small and often" / 17:00-spine bias, §Mindset's "Winning is the goal" examples (APG/Sustainista/fellow hackers, Saturday-afternoon-cut framing), §Demo/pitch's 3-min hard cap. They're preserved as a historical record of how we operated during the hackathon. The sprint pressure is gone — apply the rest of CLAUDE.md with that lens.
+- **Several sections above are hackathon-specific** — §Saturday checkpoints, §Process's "push small and often" rule, §Mindset's "Winning is the goal" bullet and "no ego on cuts" (Saturday-afternoon-cut framing), §Demo/pitch's 3-min hard cap. They're preserved as a historical record of how we operated during the hackathon. The sprint pressure is gone — apply the rest of CLAUDE.md with that lens.
 - **Bias toward presentation quality, not new scope.** A passerby (hiring manager, fellow hacker) lands on the repo cold; README, docs, code clarity, and demo polish are what they see first.
 - **Don't expand surface area.** New features are out of scope unless they materially improve the portfolio story. Refactors, doc cleanup, and polish are in scope.
